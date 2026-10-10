@@ -71,6 +71,8 @@ struct Entry {
 pub struct Budget {
     ledger: Arc<Mutex<Vec<Entry>>>,
     id: usize,
+    changes: tokio::sync::watch::Sender<()>,
+    wait_capacity: bool,
 }
 impl Budget {
     /// Start an independent run ledger.
@@ -83,6 +85,8 @@ impl Budget {
                 refusal: None,
             }])),
             id: 0,
+            changes: tokio::sync::watch::channel(()).0,
+            wait_capacity: false,
         }
     }
     /// Add a per-turn ceiling, still charged to this run and all ancestors.
@@ -103,6 +107,8 @@ impl Budget {
         Self {
             ledger: self.ledger.clone(),
             id,
+            changes: self.changes.clone(),
+            wait_capacity: self.wait_capacity,
         }
     }
     /// Read this ledger's spend, including its children.
@@ -128,32 +134,65 @@ impl Budget {
             })
     }
 
+    /// Opt this handle's budgeted models into waiting for live capacity.
+    /// Clones and children created from this handle inherit the preference;
+    /// existing other handles and direct [`Self::reserve`] calls stay fail-fast.
+    /// Waiting never permits a call that settled spend cannot afford.
+    pub fn wait_for_capacity(mut self) -> Self {
+        self.wait_capacity = true;
+        self
+    }
+
     /// Atomically admit a physical call against this ledger and its ancestors.
     pub fn reserve(&self, requested: Spend) -> Result<Reservation, BudgetExceeded> {
+        self.reserve_inner(requested, false)
+            .map_err(|refusal| refusal.error)
+    }
+
+    fn reserve_inner(
+        &self,
+        requested: Spend,
+        waiting: bool,
+    ) -> Result<Reservation, AdmissionRefusal> {
         let mut ledger = self
             .ledger
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut ids = ledger[self.id].ancestors.clone();
         ids.push(self.id);
-        for &id in &ids {
+        let capacity = ids.iter().copied().find(|&id| {
             let entry = &ledger[id];
-            let committed = entry.snapshot.spent.add(entry.snapshot.reserved);
-
-            if entry.limits.tokens.is_some_and(|max| {
-                committed.tokens >= max || requested.tokens > max.saturating_sub(committed.tokens)
-            }) || entry.limits.cost_micros.is_some_and(|max| {
-                committed.cost_micros >= max
-                    || requested.cost_micros > max.saturating_sub(committed.cost_micros)
-            }) {
-                let error = BudgetExceeded {
-                    snapshot: entry.snapshot,
-                    requested,
-                    limits: entry.limits,
-                };
+            exceeds(
+                entry.limits,
+                entry.snapshot.spent.add(entry.snapshot.reserved),
+                requested,
+            )
+        });
+        if let Some(capacity_id) = capacity {
+            // Check all settled ceilings under the same lock. A live parent
+            // reservation must not hide a permanently unaffordable child.
+            let permanent = waiting
+                .then(|| {
+                    ids.iter().copied().find(|&id| {
+                        let entry = &ledger[id];
+                        exceeds(entry.limits, entry.snapshot.spent, requested)
+                    })
+                })
+                .flatten();
+            let terminal = !waiting || permanent.is_some();
+            let id = permanent.unwrap_or(capacity_id);
+            let entry = &ledger[id];
+            let error = BudgetExceeded {
+                snapshot: entry.snapshot,
+                requested,
+                limits: entry.limits,
+            };
+            // Only terminal refusals feed facade error classification. A
+            // temporary wait must neither publish nor clear another refusal.
+            if terminal {
                 ledger[self.id].refusal = Some((id, error.clone()));
-                return Err(error);
             }
+            return Err(AdmissionRefusal { error, terminal });
         }
         for &id in &ids {
             ledger[id].snapshot.reserved = ledger[id].snapshot.reserved.add(requested);
@@ -165,6 +204,10 @@ impl Budget {
             settled: false,
         })
     }
+}
+struct AdmissionRefusal {
+    error: BudgetExceeded,
+    terminal: bool,
 }
 /// An admitted call. Dropping without settlement charges the full reservation.
 #[derive(Debug)]
@@ -194,6 +237,9 @@ impl Reservation {
             snapshot.spent = snapshot.spent.add(actual);
         }
         self.settled = true;
+        drop(ledger);
+        // Every settlement, including conservative Drop, changes admission.
+        self.budget.changes.send_replace(());
     }
 }
 impl Drop for Reservation {
@@ -271,7 +317,7 @@ impl<State: Send + Sync> BudgetedModel<State> {
             call,
         }
     }
-    fn admit(&self, request: &mut ModelRequest) -> crate::Result<Reservation> {
+    async fn admit(&self, request: &mut ModelRequest) -> crate::Result<Reservation> {
         if ["max_tokens", "max_completion_tokens", "max_output_tokens"]
             .iter()
             .any(|key| request.provider_options.get(*key).is_some())
@@ -317,9 +363,12 @@ impl<State: Send + Sync> BudgetedModel<State> {
                 .saturating_add(request.max_tokens.unwrap_or_default() as u64),
             cost_micros: self.call.cost_micros,
         };
-        self.budget
-            .reserve(amount)
-            .map_err(crate::Error::BudgetExceeded)
+        let admission = if self.budget.wait_capacity {
+            self.budget.reserve_wait(amount).await
+        } else {
+            self.budget.reserve(amount)
+        };
+        admission.map_err(crate::Error::BudgetExceeded)
     }
     fn settle(reservation: Reservation, response: &ModelResponse) {
         let reserved = reservation.requested;
@@ -364,7 +413,7 @@ impl<State: Send + Sync> ChatModel<State> for BudgetedModel<State> {
         state: &State,
         mut request: ModelRequest,
     ) -> crate::Result<ModelResponse> {
-        let reservation = self.admit(&mut request)?;
+        let reservation = self.admit(&mut request).await?;
         let scope = Arc::new(AttemptScope {
             budget: self.budget.clone(),
             requested: reservation.requested,
@@ -377,7 +426,7 @@ impl<State: Send + Sync> ChatModel<State> for BudgetedModel<State> {
         Ok(response)
     }
     async fn stream(&self, state: &State, mut request: ModelRequest) -> crate::Result<ModelStream> {
-        let reservation = self.admit(&mut request)?;
+        let reservation = self.admit(&mut request).await?;
         let scope = Arc::new(AttemptScope {
             budget: self.budget.clone(),
             requested: reservation.requested,
@@ -417,3 +466,21 @@ impl<State: Send + Sync> ChatModel<State> for BudgetedModel<State> {
 #[cfg(test)]
 #[path = "budget_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "budget_wait_tests.rs"]
+mod wait_tests;
+
+// Keep fail-fast and waiting admission on the same ceiling arithmetic,
+// including explicit zero limits and saturating committed spend.
+fn exceeds(limits: SpendLimits, committed: Spend, requested: Spend) -> bool {
+    limits.tokens.is_some_and(|max| {
+        committed.tokens >= max || requested.tokens > max.saturating_sub(committed.tokens)
+    }) || limits.cost_micros.is_some_and(|max| {
+        committed.cost_micros >= max
+            || requested.cost_micros > max.saturating_sub(committed.cost_micros)
+    })
+}
+
+#[path = "budget_wait.rs"]
+mod wait;
