@@ -268,3 +268,38 @@ async fn cancelling_queued_model_admission_does_not_dispatch_or_charge_it() {
     assert_eq!(ledger.snapshot().spent.cost_micros, 10);
     assert_eq!(ledger.snapshot().reserved.cost_micros, 0);
 }
+
+#[tokio::test]
+async fn temporary_wait_and_its_cancellation_publish_no_refusal() {
+    let budget = ledger(100);
+    let live = budget.reserve(spend(80)).unwrap();
+    let mut waiting = Box::pin(budget.reserve_wait(spend(60)));
+    assert!(poll!(waiting.as_mut()).is_pending());
+    assert!(
+        budget.refusal().is_none(),
+        "temporary capacity pressure is not a terminal refusal"
+    );
+    drop(waiting);
+    assert!(
+        budget.refusal().is_none(),
+        "canceling an unadmitted waiter must not poison later calls"
+    );
+    live.settle(spend(10));
+    let admitted = budget.reserve_wait(spend(60)).await.unwrap();
+    assert!(budget.refusal().is_none());
+    admitted.settle(spend(10));
+}
+
+#[tokio::test]
+async fn temporary_wait_preserves_an_existing_fail_fast_refusal() {
+    let budget = ledger(100);
+    let live = budget.reserve(spend(80)).unwrap();
+    let original = budget.reserve(spend(70)).unwrap_err();
+    let mut waiting = Box::pin(budget.reserve_wait(spend(60)));
+    assert!(poll!(waiting.as_mut()).is_pending());
+    assert_eq!(budget.refusal().unwrap().requested, original.requested);
+    live.settle(spend(10));
+    let admitted = waiting.await.unwrap();
+    assert_eq!(budget.refusal().unwrap().requested, original.requested);
+    admitted.settle(spend(10));
+}

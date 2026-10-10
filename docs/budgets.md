@@ -20,6 +20,8 @@ wakeup rechecks all ancestor limits atomically. If settled spend plus the call's
 bound cannot fit any ceiling, admission returns `BudgetExceeded` immediately.
 Direct `Budget::reserve` and provider-internal retry hooks remain fail-fast.
 `Budget::reserve_wait` exposes the same asynchronous reservation operation.
+Temporary capacity waits do not publish a terminal admission refusal, including
+when canceled. An existing fail-fast refusal remains recorded unchanged.
 
 Settlement notifications are retained if settlement occurs before a waiter
 starts awaiting the change. Dropping a queued admission future makes no

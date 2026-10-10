@@ -145,25 +145,54 @@ impl Budget {
 
     /// Atomically admit a physical call against this ledger and its ancestors.
     pub fn reserve(&self, requested: Spend) -> Result<Reservation, BudgetExceeded> {
+        self.reserve_inner(requested, false)
+            .map_err(|refusal| refusal.error)
+    }
+
+    fn reserve_inner(
+        &self,
+        requested: Spend,
+        waiting: bool,
+    ) -> Result<Reservation, AdmissionRefusal> {
         let mut ledger = self
             .ledger
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut ids = ledger[self.id].ancestors.clone();
         ids.push(self.id);
-        for &id in &ids {
+        let capacity = ids.iter().copied().find(|&id| {
             let entry = &ledger[id];
-            let committed = entry.snapshot.spent.add(entry.snapshot.reserved);
-
-            if exceeds(entry.limits, committed, requested) {
-                let error = BudgetExceeded {
-                    snapshot: entry.snapshot,
-                    requested,
-                    limits: entry.limits,
-                };
+            exceeds(
+                entry.limits,
+                entry.snapshot.spent.add(entry.snapshot.reserved),
+                requested,
+            )
+        });
+        if let Some(capacity_id) = capacity {
+            // Check all settled ceilings under the same lock. A live parent
+            // reservation must not hide a permanently unaffordable child.
+            let permanent = waiting
+                .then(|| {
+                    ids.iter().copied().find(|&id| {
+                        let entry = &ledger[id];
+                        exceeds(entry.limits, entry.snapshot.spent, requested)
+                    })
+                })
+                .flatten();
+            let terminal = !waiting || permanent.is_some();
+            let id = permanent.unwrap_or(capacity_id);
+            let entry = &ledger[id];
+            let error = BudgetExceeded {
+                snapshot: entry.snapshot,
+                requested,
+                limits: entry.limits,
+            };
+            // Only terminal refusals feed facade error classification. A
+            // temporary wait must neither publish nor clear another refusal.
+            if terminal {
                 ledger[self.id].refusal = Some((id, error.clone()));
-                return Err(error);
             }
+            return Err(AdmissionRefusal { error, terminal });
         }
         for &id in &ids {
             ledger[id].snapshot.reserved = ledger[id].snapshot.reserved.add(requested);
@@ -175,6 +204,10 @@ impl Budget {
             settled: false,
         })
     }
+}
+struct AdmissionRefusal {
+    error: BudgetExceeded,
+    terminal: bool,
 }
 /// An admitted call. Dropping without settlement charges the full reservation.
 #[derive(Debug)]

@@ -15,12 +15,13 @@ impl Budget {
         // retained by watch, so the waiter cannot lose its wakeup.
         let mut changes = self.changes.subscribe();
         loop {
-            match self.reserve(requested) {
+            match self.reserve_inner(requested, true) {
                 Ok(reservation) => return Ok(reservation),
-                Err(error) => {
-                    if let Some(terminal) = self.permanent_refusal(requested) {
-                        return Err(terminal);
+                Err(refusal) => {
+                    if refusal.terminal {
+                        return Err(refusal.error);
                     }
+                    let error = refusal.error;
                     log_wait(&error);
                     // The borrowed Budget keeps the sender alive. If that
                     // invariant changes, refusing remains conservative.
@@ -30,30 +31,6 @@ impl Budget {
                 }
             }
         }
-    }
-
-    fn permanent_refusal(&self, requested: Spend) -> Option<BudgetExceeded> {
-        let mut ledger = self
-            .ledger
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        let mut ids = ledger[self.id].ancestors.clone();
-        ids.push(self.id);
-        // Inspect every ancestor: an earlier live-capacity refusal must not
-        // hide a later permanently unaffordable child or parent ceiling.
-        for id in ids {
-            let entry = &ledger[id];
-            if exceeds(entry.limits, entry.snapshot.spent, requested) {
-                let error = BudgetExceeded {
-                    snapshot: entry.snapshot,
-                    requested,
-                    limits: entry.limits,
-                };
-                ledger[self.id].refusal = Some((id, error.clone()));
-                return Some(error);
-            }
-        }
-        None
     }
 }
 
