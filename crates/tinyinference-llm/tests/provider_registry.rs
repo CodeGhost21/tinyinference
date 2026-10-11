@@ -51,14 +51,14 @@ async fn registry_routes_send_the_configured_wire_request() {
                             let body =
                                 serde_json::from_slice::<serde_json::Value>(&bytes[end + 4..])
                                     .unwrap();
-                            if call == 0 && native_ctx.is_some() {
+                            if let Some(native_ctx) = native_ctx.filter(|_| call == 0) {
                                 assert!(
                                     header.starts_with("POST /api/chat ")
                                         || header.starts_with("POST /api/chat?"),
                                     "unexpected native route: {}",
                                     header.lines().next().unwrap()
                                 );
-                                assert_eq!(body["options"]["num_ctx"], native_ctx.unwrap());
+                                assert_eq!(body["options"]["num_ctx"], native_ctx);
                                 if variant == "local_override" {
                                     assert_eq!(body["options"]["num_predict"], 32);
                                 }
