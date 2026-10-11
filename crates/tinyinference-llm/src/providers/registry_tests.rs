@@ -158,17 +158,32 @@ fn price_ordering_is_only_supplied_to_openrouter() {
 }
 
 #[tokio::test]
-async fn local_and_codex_routes_send_the_configured_wire_request() {
+async fn registry_routes_send_the_configured_wire_request() {
     use crate::message::Message;
     use crate::model::ModelRequest;
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
-    for oauth in [false, true] {
+    for variant in ["local", "cloud", "codex", "anthropic", "openrouter"] {
+        let oauth = variant == "codex";
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
         let capture = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
+            let started = std::time::Instant::now();
+            let (mut stream, _) = loop {
+                match listener.accept() {
+                    Ok(connection) => break connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        assert!(
+                            started.elapsed() < std::time::Duration::from_secs(5),
+                            "adapter never connected"
+                        );
+                        std::thread::sleep(std::time::Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("accept failed: {error}"),
+                }
+            };
             stream
                 .set_read_timeout(Some(std::time::Duration::from_secs(5)))
                 .unwrap();
@@ -197,12 +212,19 @@ async fn local_and_codex_routes_send_the_configured_wire_request() {
                 }
             }
         });
-        let mut spec = ProviderSpec::for_kind(if oauth {
-            ProviderKind::OpenAi
-        } else {
-            ProviderKind::Ollama
-        });
-        spec.base_url = format!("http://{address}/v1");
+        let kind = match variant {
+            "local" => ProviderKind::Ollama,
+            "anthropic" => ProviderKind::Anthropic,
+            "openrouter" => ProviderKind::OpenRouter,
+            _ => ProviderKind::OpenAi,
+        };
+        let mut spec = ProviderSpec::for_kind(kind);
+        let host = match variant {
+            "anthropic" => "api.anthropic.com",
+            "openrouter" => "openrouter.ai",
+            _ => "127.0.0.1",
+        };
+        spec.base_url = format!("http://{host}:{}/v1", address.port());
         let route = OpenAiCodexRouting {
             endpoint: spec.base_url.clone(),
             using_oauth: oauth,
@@ -219,7 +241,13 @@ async fn local_and_codex_routes_send_the_configured_wire_request() {
                     codex: oauth.then_some(&route),
                     extra_headers: &headers,
                     extra_query_params: &query,
-                    http: Some(reqwest::Client::builder().no_proxy().build().unwrap()),
+                    http: Some(
+                        reqwest::Client::builder()
+                            .no_proxy()
+                            .resolve(host, address)
+                            .build()
+                            .unwrap(),
+                    ),
                     ..Default::default()
                 },
             )
@@ -235,17 +263,30 @@ async fn local_and_codex_routes_send_the_configured_wire_request() {
         );
         let (header, body) = capture.join().unwrap();
         assert!(header.contains("x-host: test-host"));
-        assert!(header.contains("client_version=test-version"));
+        if variant != "anthropic" {
+            assert!(header.contains("client_version=test-version"));
+        }
         assert_eq!(body["model"], spec.model);
         assert_eq!(body["temperature"], 0.25);
         if oauth {
             assert!(header.starts_with("POST /v1/responses?"));
             assert!(header.contains("authorization: Bearer test-key"));
             assert!(body.get("max_output_tokens").is_none());
+        } else if variant == "anthropic" {
+            assert!(header.starts_with("POST /v1/messages "));
+            assert!(header.contains("x-api-key: test-key"));
+            assert_eq!(body["max_tokens"], 123);
         } else {
             assert!(header.starts_with("POST /v1/chat/completions?"));
-            assert!(!header.contains("authorization:"));
-            assert_eq!(body["options"]["num_ctx"], 8192);
+            if variant == "local" {
+                assert!(!header.contains("authorization:"));
+                assert_eq!(body["options"]["num_ctx"], 8192);
+            } else {
+                assert!(header.contains("authorization: Bearer test-key"));
+            }
+            if variant == "openrouter" {
+                assert_eq!(body["provider"]["sort"], "price");
+            }
             assert_eq!(body["max_tokens"], 123);
         }
     }
