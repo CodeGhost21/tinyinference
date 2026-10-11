@@ -634,12 +634,7 @@ impl ModelListingFetcher for ListingThenHungProbe {
         }
     }
 
-    async fn post_json(
-        &self,
-        _: &str,
-        _: &[(String, String)],
-        _: &Value,
-    ) -> crate::Result<Value> {
+    async fn post_json(&self, _: &str, _: &[(String, String)], _: &Value) -> crate::Result<Value> {
         futures::future::pending().await
     }
 }
@@ -652,15 +647,23 @@ async fn regression_target_timeout_preserves_completed_sibling_records() {
             .with_single_model_probe(single_model)
             .with_ollama_native(!single_model)
             .with_timeout(Duration::from_millis(50));
-        assert!(discover_model_limits_with(&ListingThenHungProbe, &cache, &request).await.is_none());
+        assert!(
+            discover_model_limits_with(&ListingThenHungProbe, &cache, &request)
+                .await
+                .is_none()
+        );
         assert_eq!(
-            cache.get_variant(ENDPOINT, "target", &request.cache_variant()).discovered,
+            cache
+                .get_variant(ENDPOINT, "target", &request.cache_variant())
+                .discovered,
             Some(None),
         );
         let mut sibling = request;
         sibling.model = "sibling".into();
         let offline = FakeFetcher::default();
-        let limits = discover_model_limits_with(&offline, &cache, &sibling).await.unwrap();
+        let limits = discover_model_limits_with(&offline, &cache, &sibling)
+            .await
+            .unwrap();
         assert_eq!(limits.context_window, Some(96000));
         assert_eq!(limits.max_output_tokens, Some(4096));
         assert!(offline.calls().is_empty());

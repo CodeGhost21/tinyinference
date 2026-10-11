@@ -581,9 +581,14 @@ fn regression_input_debug_omits_discovery_credentials() {
     };
     let debug = format!("{input:?}");
     for secret in [
-        "endpoint-user", "endpoint-password", "endpoint-key",
-        "listing-user", "listing-password", "listing-key",
-        "listing-fragment", "header-secret",
+        "endpoint-user",
+        "endpoint-password",
+        "endpoint-key",
+        "listing-user",
+        "listing-password",
+        "listing-key",
+        "listing-fragment",
+        "header-secret",
     ] {
         assert!(!debug.contains(secret), "input debug disclosed credentials");
     }
