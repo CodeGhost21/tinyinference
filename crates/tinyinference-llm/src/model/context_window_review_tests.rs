@@ -153,7 +153,7 @@ impl ModelListingFetcher for HeldListing {
         self.started.notify_one();
         self.release.notified().await;
         Ok(
-            serde_json::json!({"data":[{"id":"model","context_length":128000,"max_output_tokens":4096}]}),
+            serde_json::json!({"data":[{"id":"model","context_length":128000,"max_output_tokens":4096},{"id":"sibling","context_length":96000}]}),
         )
     }
 }
@@ -268,6 +268,13 @@ async fn clear_prevents_pending_discovery_from_poisoning_reused_cache() {
         }
         old.release.notify_one();
         let _ = task.await.unwrap();
+        assert!(
+            cache
+                .get_variant(&request.endpoint, "sibling", &request.cache_variant())
+                .discovered
+                .is_none(),
+            "old listing must not prime another model after identity clearing"
+        );
         let result = resolver
             .resolve(
                 "route",
