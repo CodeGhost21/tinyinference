@@ -213,10 +213,11 @@ pub fn is_builtin_cloud_slug(slug: &str) -> bool {
 
 /// Whether a builtin preset supports the OpenAI Responses API.
 ///
-/// Only the first-party OpenAI preset enables the fallback. Unknown proxies
-/// retain their caller-selected capability; they are not builtin presets.
+/// OpenAI, OpenRouter, and xAI expose the Responses API at their cataloged
+/// endpoints. Unknown proxies retain their caller-selected capability; they
+/// are not builtin presets.
 pub fn builtin_cloud_supports_responses_api(slug: &str) -> bool {
-    matches!(slug, "openai")
+    matches!(slug, "openai" | "openrouter" | "xai")
 }
 
 /// Extract the lowercased authority host from an endpoint URL, dropping the
@@ -241,10 +242,12 @@ pub fn endpoint_host(endpoint: &str) -> Option<String> {
     let host = if let Some(rest) = host_port.strip_prefix('[') {
         rest.split_once(']').map(|(h, _)| h).unwrap_or(rest)
     } else {
-        host_port
-            .rsplit_once(':')
-            .map(|(h, _)| h)
-            .unwrap_or(host_port)
+        match host_port.split_once(':') {
+            // More than one colon without brackets is not a valid host:port.
+            Some((_, rest)) if rest.contains(':') => return None,
+            Some((h, _)) => h,
+            None => host_port,
+        }
     };
     let host = host.trim().to_ascii_lowercase();
     (!host.is_empty()).then_some(host)

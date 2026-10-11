@@ -69,8 +69,10 @@ fn is_builtin_cloud_slug_matches_presets_only() {
 }
 
 #[test]
-fn only_openai_builtin_exposes_responses_api() {
+fn responses_capable_builtins_expose_responses_api() {
     assert!(builtin_cloud_supports_responses_api("openai"));
+    assert!(builtin_cloud_supports_responses_api("openrouter"));
+    assert!(builtin_cloud_supports_responses_api("xai"));
     for slug in ["deepseek", "groq", "mistral", "fireworks", "together"] {
         assert!(
             !builtin_cloud_supports_responses_api(slug),
@@ -81,17 +83,16 @@ fn only_openai_builtin_exposes_responses_api() {
 
 /// Drift guard (TAURI-RUST-5EN): couple the capability helper to the
 /// preset list so adding a new built-in that wrongly claims the Responses
-/// API — or renaming `openai` — fails CI rather than silently re-enabling
-/// the guaranteed-404 `/responses` fallback. OpenAI's first-party endpoint
-/// is the only built-in that serves `/v1/responses`.
+/// API fails CI rather than silently enabling an unsupported `/responses`
+/// fallback.
 #[test]
 fn responses_api_capability_is_coupled_to_the_preset_list() {
     for provider in BUILTIN_CLOUD_PROVIDERS {
-        let expected = provider.slug == "openai";
+        let expected = matches!(provider.slug, "openai" | "openrouter" | "xai");
         assert_eq!(
             builtin_cloud_supports_responses_api(provider.slug),
             expected,
-            "built-in {} Responses-API capability drifted from the openai-only invariant",
+            "built-in {} Responses-API capability drifted from the catalog invariant",
             provider.slug
         );
     }
@@ -118,6 +119,8 @@ fn endpoint_host_parses_scheme_path_and_port() {
         endpoint_host("http://[::1]:8080/v1").as_deref(),
         Some("::1")
     );
+    assert_eq!(endpoint_host("::1"), None);
+    assert_eq!(endpoint_host("fe80::1"), None);
     assert_eq!(endpoint_host("   ").as_deref(), None);
 }
 
