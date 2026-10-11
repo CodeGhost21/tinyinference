@@ -118,7 +118,7 @@ pub fn build_openai_model_with_http(
 
 /// [`build_openai_model`] with the Anthropic-model `cache_control` default made
 /// explicit; a local runtime passes `false` so it never receives the markers.
-fn build_openai_model_with(
+pub(crate) fn build_openai_model_with(
     config: OpenAiConfig<'_>,
     anthropic_cache_control: bool,
     http: Option<reqwest::Client>,

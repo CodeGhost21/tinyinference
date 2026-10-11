@@ -43,7 +43,7 @@ mod request;
 mod response;
 mod stream;
 
-pub use config::{AnthropicConfig, build_anthropic_model, endpoint_is_anthropic_messages};
+pub use config::{AnthropicConfig, build_anthropic_model, build_anthropic_model_with_http, endpoint_is_anthropic_messages};
 
 #[cfg(test)]
 #[path = "config_tests.rs"]

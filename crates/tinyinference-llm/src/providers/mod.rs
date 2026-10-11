@@ -36,6 +36,7 @@
 
 mod media;
 mod types;
+pub mod registry;
 
 // --- real provider integrations ---
 // The OpenAI Chat Completions adapter is always compiled; it also serves every
