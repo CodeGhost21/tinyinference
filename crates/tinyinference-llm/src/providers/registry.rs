@@ -126,7 +126,9 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
         let oauth = options.codex.is_some_and(|routing| routing.using_oauth);
         let provider_options = options.default_provider_options.clone().or_else(|| {
             if local {
-                options.num_ctx.map(|num_ctx| serde_json::json!({"options": {"num_ctx": num_ctx}}))
+                options
+                    .num_ctx
+                    .map(|num_ctx| serde_json::json!({"options": {"num_ctx": num_ctx}}))
             } else {
                 openrouter_default_provider_options(endpoint)
             }
@@ -177,9 +179,12 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
         if !key.trim().is_empty() {
             request = match effective_auth(spec, options) {
                 AuthStyle::None => request,
-                AuthStyle::Bearer => request.with_header("Authorization", format!("Bearer {}", key.trim())),
+                AuthStyle::Bearer => {
+                    request.with_header("Authorization", format!("Bearer {}", key.trim()))
+                }
                 AuthStyle::XApiKey => request.with_header("x-api-key", key.trim()),
-                AuthStyle::Anthropic => request.with_header("x-api-key", key.trim())
+                AuthStyle::Anthropic => request
+                    .with_header("x-api-key", key.trim())
                     .with_header("anthropic-version", "2023-06-01"),
                 AuthStyle::Custom(name) => request.with_header(name, key.trim()),
             };
@@ -187,7 +192,9 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
         for (name, value) in options.extra_headers {
             request = request.with_header(name, value);
         }
-        if let Some(provider_options) = options.default_provider_options.clone()
+        if let Some(provider_options) = options
+            .default_provider_options
+            .clone()
             .or_else(|| openrouter_default_provider_options(endpoint))
         {
             request = request.with_pinned_providers(pinned_openrouter_providers(&provider_options));
@@ -198,7 +205,10 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
     fn resolve_key(&self, spec: &ProviderSpec) -> Result<String> {
         let key = self.credentials.resolve(spec)?;
         if spec.requires_api_key && key.trim().is_empty() {
-            return Err(Error::Validation(format!("provider '{}' requires an API key", spec.provider)));
+            return Err(Error::Validation(format!(
+                "provider '{}' requires an API key",
+                spec.provider
+            )));
         }
         Ok(key)
     }
@@ -207,8 +217,7 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
 /// Stable price ordering for direct OpenRouter routes; request-specific
 /// options can override it. Other endpoints receive no default routing option.
 pub fn openrouter_default_provider_options(endpoint: &str) -> Option<serde_json::Value> {
-    endpoint_is_openrouter(endpoint)
-        .then(|| serde_json::json!({"provider": {"sort": "price"}}))
+    endpoint_is_openrouter(endpoint).then(|| serde_json::json!({"provider": {"sort": "price"}}))
 }
 
 fn validate(spec: &ProviderSpec) -> Result<()> {
@@ -216,17 +225,27 @@ fn validate(spec: &ProviderSpec) -> Result<()> {
         return Err(Error::Validation("provider model must not be empty".into()));
     }
     if spec.base_url.trim().is_empty() {
-        return Err(Error::Validation("provider endpoint must not be empty".into()));
+        return Err(Error::Validation(
+            "provider endpoint must not be empty".into(),
+        ));
     }
     Ok(())
 }
 
 fn is_local(kind: &ProviderKind) -> bool {
-    matches!(kind, ProviderKind::Ollama | ProviderKind::LmStudio | ProviderKind::LlamaCpp | ProviderKind::Vllm)
+    matches!(
+        kind,
+        ProviderKind::Ollama | ProviderKind::LmStudio | ProviderKind::LlamaCpp | ProviderKind::Vllm
+    )
 }
 
-fn effective_endpoint<'a>(spec: &'a ProviderSpec, options: &'a ProviderBuildOptions<'_>) -> &'a str {
-    options.codex.map_or(&spec.base_url, |route| &route.endpoint)
+fn effective_endpoint<'a>(
+    spec: &'a ProviderSpec,
+    options: &'a ProviderBuildOptions<'_>,
+) -> &'a str {
+    options
+        .codex
+        .map_or(&spec.base_url, |route| &route.endpoint)
 }
 
 fn effective_auth(spec: &ProviderSpec, options: &ProviderBuildOptions<'_>) -> AuthStyle {
