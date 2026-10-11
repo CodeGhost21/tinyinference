@@ -72,13 +72,26 @@ pub struct ContextWindowInput<'a> {
 
 /// Instance-owned route/model window state and precedence resolution.
 ///
+/// Provider-sourced output caps are remembered independently of context windows.
 /// Only provider-sourced and learned windows are remembered. Explicit host
 /// overrides and fallback guesses are evaluated anew on every call. Keys are
 /// trimmed and ASCII-folded, matching the existing model-limit cache and the
 /// host migration's synchronous lookup semantics.
 #[derive(Debug, Default)]
 pub struct ContextWindowResolver {
-    remembered: Mutex<HashMap<(String, String), ResolvedWindow>>,
+    state: Mutex<ResolverState>,
+}
+
+#[derive(Debug, Default)]
+struct ResolverState {
+    generation: u64,
+    remembered: HashMap<(String, String), RememberedLimits>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RememberedLimits {
+    window: Option<(u64, WindowSource)>,
+    max_output_tokens: Option<u64>,
 }
 
 impl ContextWindowResolver {
@@ -89,19 +102,20 @@ impl ContextWindowResolver {
 
     /// Returns the last provider-sourced window resolved for a route/model.
     pub fn remembered_window(&self, provider: &str, model: &str) -> Option<u64> {
-        self.remembered
+        self.state
             .lock()
             .unwrap_or_else(|error| error.into_inner())
+            .remembered
             .get(&key(provider, model))
-            .and_then(|resolved| resolved.window)
+            .and_then(|resolved| resolved.window.map(|(window, _)| window))
     }
 
-    /// Clears remembered windows when the host replaces runtime identity.
+    /// Clears remembered limits when the host replaces runtime identity.
+    /// Pending discovery may finish, but cannot repopulate the newer identity.
     pub fn clear(&self) {
-        self.remembered
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .clear();
+        let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        state.generation = state.generation.wrapping_add(1);
+        state.remembered.clear();
     }
 
     /// Resolves override > discovered/learned > remembered > static/local > unknown.
@@ -118,11 +132,22 @@ impl ContextWindowResolver {
         fetcher: &dyn ModelListingFetcher,
         cache: &ModelLimitsCache,
     ) -> ResolvedWindow {
+        let route_key = key(provider, model);
+        let (generation, remembered_cap) = {
+            let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            (
+                state.generation,
+                state
+                    .remembered
+                    .get(&route_key)
+                    .and_then(|limits| limits.max_output_tokens),
+            )
+        };
         if let Some(window) = input.config_override.filter(|window| *window > 0) {
             return ResolvedWindow {
                 window: Some(window),
                 source: WindowSource::ConfigOverride,
-                max_output_tokens: None,
+                max_output_tokens: remembered_cap,
             };
         }
         let limits = if let Some(request) = input.discovery {
@@ -134,38 +159,41 @@ impl ContextWindowResolver {
             .as_ref()
             .and_then(|limits| limits.max_output_tokens)
             .filter(|tokens| *tokens > 0);
-        if let Some(limits) = limits
-            && let Some(window) = limits.context_window.filter(|window| *window > 0)
+        let discovered_window = limits.as_ref().and_then(|limits| {
+            limits
+                .context_window
+                .filter(|window| *window > 0)
+                .map(|window| {
+                    let source = match limits.source {
+                        LimitSource::LearnedFromOverflow => WindowSource::LearnedFromOverflow,
+                        _ => WindowSource::ProviderReported,
+                    };
+                    (window, source)
+                })
+        });
+        let remembered = {
+            let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+            if state.generation == generation {
+                if discovered_window.is_some() || max_output_tokens.is_some() {
+                    let entry = state.remembered.entry(route_key.clone()).or_default();
+                    entry.window = discovered_window.or(entry.window);
+                    entry.max_output_tokens = max_output_tokens.or(entry.max_output_tokens);
+                }
+                state.remembered.get(&route_key).copied()
+            } else {
+                None
+            }
+        };
+        let max_output_tokens =
+            max_output_tokens.or(remembered.and_then(|limits| limits.max_output_tokens));
+        if let Some((window, source)) =
+            discovered_window.or(remembered.and_then(|limits| limits.window))
         {
-            let source = match limits.source {
-                LimitSource::LearnedFromOverflow => WindowSource::LearnedFromOverflow,
-                _ => WindowSource::ProviderReported,
-            };
-            let mut remembered = self
-                .remembered
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            let route_key = key(provider, model);
-            let remembered_cap = remembered
-                .get(&route_key)
-                .and_then(|resolved| resolved.max_output_tokens);
-            let resolved = ResolvedWindow {
+            return ResolvedWindow {
                 window: Some(window),
                 source,
-                max_output_tokens: max_output_tokens.or(remembered_cap),
+                max_output_tokens,
             };
-            remembered.insert(route_key, resolved);
-            return resolved;
-        }
-        {
-            let mut remembered = self
-                .remembered
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
-            if let Some(resolved) = remembered.get_mut(&key(provider, model)) {
-                resolved.max_output_tokens = max_output_tokens.or(resolved.max_output_tokens);
-                return *resolved;
-            }
         }
         let (window, source) =
             if let Some(window) = input.static_window.filter(|window| *window > 0) {
