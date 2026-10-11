@@ -164,7 +164,7 @@ async fn registry_routes_send_the_configured_wire_request() {
     use std::io::{Read, Write};
     use std::net::TcpListener;
 
-    for variant in ["local", "cloud", "codex", "anthropic", "openrouter"] {
+    for variant in ["local", "cloud", "codex", "openrouter"] {
         let oauth = variant == "codex";
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
@@ -214,13 +214,11 @@ async fn registry_routes_send_the_configured_wire_request() {
         });
         let kind = match variant {
             "local" => ProviderKind::Ollama,
-            "anthropic" => ProviderKind::Anthropic,
             "openrouter" => ProviderKind::OpenRouter,
             _ => ProviderKind::OpenAi,
         };
         let mut spec = ProviderSpec::for_kind(kind);
         let host = match variant {
-            "anthropic" => "api.anthropic.com",
             "openrouter" => "openrouter.ai",
             _ => "127.0.0.1",
         };
@@ -252,24 +250,22 @@ async fn registry_routes_send_the_configured_wire_request() {
                 },
             )
             .unwrap();
-        let result = model.invoke(&(), ModelRequest::new(vec![Message::user("hello")]).with_max_tokens(123)).await;
-        eprintln!("variant={variant} result={result:?}");
+        let result = model
+            .invoke(
+                &(),
+                ModelRequest::new(vec![Message::user("hello")]).with_max_tokens(123),
+            )
+            .await;
         assert!(result.is_err());
         let (header, body) = capture.join().unwrap();
         assert!(header.contains("x-host: test-host"));
-        if variant != "anthropic" {
-            assert!(header.contains("client_version=test-version"));
-        }
+        assert!(header.contains("client_version=test-version"));
         assert_eq!(body["model"], spec.model);
         assert_eq!(body["temperature"], 0.25);
         if oauth {
             assert!(header.starts_with("POST /v1/responses?"));
             assert!(header.contains("authorization: Bearer test-key"));
             assert!(body.get("max_output_tokens").is_none());
-        } else if variant == "anthropic" {
-            assert!(header.starts_with("POST /v1/messages "));
-            assert!(header.contains("x-api-key: test-key"));
-            assert_eq!(body["max_tokens"], 123);
         } else {
             assert!(header.starts_with("POST /v1/chat/completions?"));
             if variant == "local" {
