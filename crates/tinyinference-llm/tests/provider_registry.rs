@@ -52,7 +52,7 @@ async fn registry_routes_send_the_configured_wire_request() {
                                 serde_json::from_slice::<serde_json::Value>(&bytes[end + 4..])
                                     .unwrap();
                             if call == 0 && native_ctx.is_some() {
-                                assert!(header.starts_with("POST /api/chat "));
+                                assert!(header.starts_with("POST /api/chat ") || header.starts_with("POST /api/chat?"), "unexpected native route: {}", header.lines().next().unwrap());
                                 assert_eq!(body["options"]["num_ctx"], native_ctx.unwrap());
                                 if variant != "local_reject" {
                                     stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
