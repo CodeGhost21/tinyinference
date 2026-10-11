@@ -9,7 +9,7 @@ use std::sync::Mutex;
 
 use super::discover::{
     DiscoveryRequest, LimitSource, ModelLimitsCache, ModelListingFetcher,
-    discover_model_limits_with,
+    discover_model_limits_with_guard,
 };
 
 /// Where a resolved context window came from.
@@ -111,7 +111,8 @@ impl ContextWindowResolver {
     }
 
     /// Clears remembered limits when the host replaces runtime identity.
-    /// Pending discovery may finish, but cannot repopulate the newer identity.
+    /// Pending discovery may finish, but cannot repopulate the newer identity
+    /// or publish stale results into the caller's shared discovery cache.
     pub fn clear(&self) {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         state.generation = state.generation.wrapping_add(1);
@@ -151,7 +152,15 @@ impl ContextWindowResolver {
             };
         }
         let limits = if let Some(request) = input.discovery {
-            discover_model_limits_with(fetcher, cache, request).await
+            discover_model_limits_with_guard(fetcher, cache, request, &|operation| {
+                let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+                if state.generation != generation {
+                    return false;
+                }
+                operation();
+                true
+            })
+            .await
         } else {
             None
         };
