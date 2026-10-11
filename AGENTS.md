@@ -4,8 +4,12 @@
 
 TinyInference is a Rust 2024 library workspace. It owns provider-neutral model,
 message, tool-call, usage, streaming, provider transport, cache, and embedding
-APIs. Agent loops, middleware, graphs, registries, orchestration, and workspace
-policy belong in consuming runtimes such as TinyAgents.
+APIs, including stateless construction of provider adapters from a host-resolved
+ProviderSpec and matching listing authentication. Agent loops, middleware,
+graphs, saved provider registries, provider selection, managed gateway policy,
+orchestration, and workspace policy belong in consuming runtimes such as TinyAgents.
+Hosts supply credential resolution and HTTP clients; TinyInference does not load
+their configuration, own credential stores, or enforce their access/egress gates.
 
 ## Structure
 
@@ -50,6 +54,12 @@ Never log or expose API keys; custom `Debug` implementations must redact them.
 
 Every public item needs rustdoc. Document `# Errors` and `# Panics` where
 applicable. Keep Markdown files at 500 lines or fewer.
+
+Generic provider failure facts and authentication failure episode state belong
+to these library APIs. Hosts own state lifetime, timestamps, presentation text,
+managed-provider exclusions, classifier precedence, notifications and telemetry
+delivery. A library registry of authentication episodes does not load or select
+a host's saved provider configuration.
 
 ## Tests
 

@@ -83,7 +83,7 @@ const DEFAULT_CONNECT_TIMEOUT_SECS: u64 = 30;
 const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 600;
 
 pub mod codex;
-mod config;
+pub(crate) mod config;
 mod convert;
 mod local;
 mod reasoning_tags;

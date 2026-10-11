@@ -194,14 +194,39 @@ pub(super) fn translate_user_content(blocks: &[ContentBlock]) -> Result<MessageC
 /// Attaches explicit prompt-cache breakpoints to the last system message and
 /// the last user message, the two placements OpenRouter forwards to Anthropic.
 ///
+/// With `tail` set, the newest message that carries text also gets one. In a
+/// tool loop the last user message stops moving while assistant tool calls and
+/// tool results pile up behind it, so without a tail marker each call re-sends
+/// that growth uncached and writes nothing for the next call to read. Anthropic
+/// reads the longest marked prefix it holds, so the tail marker makes every
+/// call read the previous one's whole prefix and write only the delta. It is
+/// opt-in per model because Gemini behind OpenRouter honours only the last
+/// breakpoint and ignores one on a tool result, which would also discard the
+/// system marker. Three markers stay within Anthropic's limit of four.
+///
 /// Plain-string content is promoted to a single text part so the marker has a
 /// block to sit on; multi-part content gets the marker on its final text part.
 /// Messages without a text part (image-only) are left untouched.
-pub(super) fn apply_cache_breakpoints(messages: &mut [ChatMessageWire]) {
+pub(super) fn apply_cache_breakpoints(messages: &mut [ChatMessageWire], tail: bool) {
     for role in ["system", "user"] {
         if let Some(message) = messages.iter_mut().rev().find(|m| m.role == role) {
             mark_last_text_part(message);
         }
+    }
+    if tail && let Some(message) = messages.iter_mut().rev().find(|m| has_text(m)) {
+        mark_last_text_part(message);
+    }
+}
+
+/// Whether `message` has a non-empty text part a breakpoint can sit on.
+/// Anthropic rejects `cache_control` on an empty text block.
+fn has_text(message: &ChatMessageWire) -> bool {
+    match &message.content {
+        Some(MessageContentWire::Text(text)) => !text.is_empty(),
+        Some(MessageContentWire::Parts(parts)) => parts
+            .iter()
+            .any(|part| matches!(part, ContentPartWire::Text { text, .. } if !text.is_empty())),
+        None => false,
     }
 }
 

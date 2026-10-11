@@ -35,6 +35,7 @@
 //! ```
 
 mod media;
+pub mod registry;
 mod types;
 
 // --- real provider integrations ---
