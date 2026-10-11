@@ -70,13 +70,14 @@ pub struct ContextWindowInput<'a> {
     pub local_window: Option<u64>,
 }
 
-/// Instance-owned route/model window state and precedence resolution.
+/// Instance-owned route/model and discovery-identity precedence resolution.
 ///
 /// Provider-sourced output caps are remembered independently of context windows.
 /// Only provider-sourced and learned windows are remembered. Explicit host
 /// overrides and fallback guesses are evaluated anew on every call. Keys are
-/// trimmed and ASCII-folded, matching the existing model-limit cache and the
-/// host migration's synchronous lookup semantics.
+/// trimmed and ASCII-folded. A discovery identity additionally includes its
+/// endpoint, target model and cache variant (listing/probe/provider/credential
+/// scope), preventing fallback across different resolved requests.
 #[derive(Debug, Default)]
 pub struct ContextWindowResolver {
     state: Mutex<ResolverState>,
@@ -85,7 +86,13 @@ pub struct ContextWindowResolver {
 #[derive(Debug, Default)]
 struct ResolverState {
     generation: u64,
-    remembered: HashMap<(String, String), RememberedLimits>,
+    remembered: HashMap<RememberedKey, RememberedLimits>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct RememberedKey {
+    route: (String, String),
+    discovery: Option<(String, String, String)>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -100,14 +107,18 @@ impl ContextWindowResolver {
         Self::default()
     }
 
-    /// Returns the last provider-sourced window resolved for a route/model.
+    /// Returns the smallest remembered provider-sourced window for a route/model.
+    ///
+    /// This backward-compatible identity-free projection is conservative across
+    /// observed discovery variants. It does not select an endpoint or credential;
+    /// [`Self::resolve`] with discovery uses only that exact request identity.
     pub fn remembered_window(&self, provider: &str, model: &str) -> Option<u64> {
         self.state
             .lock()
             .unwrap_or_else(|error| error.into_inner())
-            .remembered
-            .get(&key(provider, model))
-            .and_then(|resolved| resolved.window.map(|(window, _)| window))
+            .projection(&key(provider, model))
+            .window
+            .map(|(window, _)| window)
     }
 
     /// Clears remembered limits when the host replaces runtime identity.
@@ -121,7 +132,10 @@ impl ContextWindowResolver {
 
     /// Resolves override > discovered/learned > remembered > static/local > unknown.
     ///
-    /// Discovery failures retain remembered provenance and output ceilings.
+    /// Discovery failures retain provenance and output ceilings only for the
+    /// matching endpoint/model/cache variant. Without a discovery request, the
+    /// route/model lookup projects the smallest observed window and output cap;
+    /// callers requiring exact routed facts must supply the resolved request.
     /// Partial discovery can supply an output ceiling independently of the window.
     /// Discovery bounds/caching come from the request and `ModelLimitsCache`. No diagnostics
     /// or telemetry are emitted: hosts use the returned source label.
@@ -133,16 +147,10 @@ impl ContextWindowResolver {
         fetcher: &dyn ModelListingFetcher,
         cache: &ModelLimitsCache,
     ) -> ResolvedWindow {
-        let route_key = key(provider, model);
+        let route_key = remembered_key(provider, model, input.discovery);
         let (generation, remembered_cap) = {
             let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-            (
-                state.generation,
-                state
-                    .remembered
-                    .get(&route_key)
-                    .and_then(|limits| limits.max_output_tokens),
-            )
+            (state.generation, state.lookup(&route_key).max_output_tokens)
         };
         if let Some(window) = input.config_override.filter(|window| *window > 0) {
             return ResolvedWindow {
@@ -188,7 +196,7 @@ impl ContextWindowResolver {
                     entry.window = discovered_window.or(entry.window);
                     entry.max_output_tokens = max_output_tokens.or(entry.max_output_tokens);
                 }
-                state.remembered.get(&route_key).copied()
+                Some(state.lookup(&route_key))
             } else {
                 None
             }
@@ -220,6 +228,61 @@ impl ContextWindowResolver {
             source,
             max_output_tokens,
         }
+    }
+}
+
+impl ResolverState {
+    fn lookup(&self, key: &RememberedKey) -> RememberedLimits {
+        if key.discovery.is_some() {
+            self.remembered.get(key).copied().unwrap_or_default()
+        } else {
+            self.projection(&key.route)
+        }
+    }
+
+    fn projection(&self, route: &(String, String)) -> RememberedLimits {
+        let mut result = RememberedLimits::default();
+        for limits in self
+            .remembered
+            .iter()
+            .filter_map(|(key, limits)| (key.route == *route).then_some(limits))
+        {
+            if let Some(window) = limits.window {
+                if result.window.is_none_or(|current| window.0 < current.0) {
+                    result.window = Some(window);
+                }
+            }
+            if let Some(cap) = limits.max_output_tokens {
+                result.max_output_tokens =
+                    Some(result.max_output_tokens.map_or(cap, |old| old.min(cap)));
+            }
+        }
+        result
+    }
+}
+
+fn remembered_key(
+    provider: &str,
+    model: &str,
+    discovery: Option<&DiscoveryRequest>,
+) -> RememberedKey {
+    RememberedKey {
+        route: key(provider, model),
+        discovery: discovery.map(|request| {
+            (
+                request
+                    .endpoint
+                    .trim()
+                    .trim_end_matches('/')
+                    .to_ascii_lowercase(),
+                request
+                    .model
+                    .trim()
+                    .trim_end_matches('/')
+                    .to_ascii_lowercase(),
+                request.cache_variant(),
+            )
+        }),
     }
 }
 
