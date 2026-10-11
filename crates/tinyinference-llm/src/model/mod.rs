@@ -14,6 +14,7 @@
 //! [`ModelStream`] back into a single [`ModelResponse`].
 
 pub mod budget;
+pub mod context_window;
 mod decorators;
 pub mod discover;
 mod fallback;
