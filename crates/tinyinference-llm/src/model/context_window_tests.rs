@@ -350,3 +350,122 @@ async fn zero_cached_discovery_is_not_remembered_and_keeps_valid_output_cap() {
     assert_eq!(resolved.max_output_tokens, Some(2048));
     assert_eq!(resolver.remembered_window("route", "model"), None);
 }
+
+#[tokio::test]
+async fn learned_only_refresh_retains_output_cap_after_discovered_entry_expires() {
+    use std::time::{Duration, Instant};
+
+    let resolver = ContextWindowResolver::new();
+    let cache = ModelLimitsCache::default();
+    let request = DiscoveryRequest::new("https://provider.example/v1", "model")
+        .with_single_model_probe(false)
+        .with_ollama_native(false);
+    let first = resolver
+        .resolve(
+            "route",
+            "model",
+            ContextWindowInput {
+                discovery: Some(&request),
+                ..Default::default()
+            },
+            &listing(Some(128_000)),
+            &cache,
+        )
+        .await;
+    assert_eq!(first.max_output_tokens, Some(4096));
+    let discovered = cache
+        .get_variant(&request.endpoint, &request.model, &request.cache_variant())
+        .discovered
+        .flatten();
+    cache.insert_discovered_variant_at(
+        &request.endpoint,
+        &request.model,
+        &request.cache_variant(),
+        discovered,
+        Instant::now() - Duration::from_secs(2 * 60 * 60),
+    );
+    cache.insert_learned(&request.endpoint, &request.model, 64_000);
+    let expired = cache.get_variant(&request.endpoint, &request.model, &request.cache_variant());
+    assert_eq!(expired.discovered, None);
+    assert_eq!(expired.learned_context_window, Some(64_000));
+    let next = resolver
+        .resolve(
+            "route",
+            "model",
+            ContextWindowInput {
+                discovery: Some(&request),
+                ..Default::default()
+            },
+            &listing(None),
+            &cache,
+        )
+        .await;
+    assert_eq!(next.window, Some(64_000));
+    assert_eq!(next.source, WindowSource::LearnedFromOverflow);
+    assert_eq!(next.max_output_tokens, Some(4096));
+    cache.clear();
+    let remembered = resolver
+        .resolve(
+            "route",
+            "model",
+            ContextWindowInput::default(),
+            &listing(None),
+            &cache,
+        )
+        .await;
+    assert_eq!(remembered, next);
+}
+
+#[tokio::test]
+async fn partial_refresh_updates_remembered_output_cap_for_later_discovery_failure() {
+    let resolver = ContextWindowResolver::new();
+    let cache = ModelLimitsCache::default();
+    let request = DiscoveryRequest::new("https://provider.example/v1", "model")
+        .with_single_model_probe(false)
+        .with_ollama_native(false);
+    resolver
+        .resolve(
+            "route",
+            "model",
+            ContextWindowInput {
+                discovery: Some(&request),
+                ..Default::default()
+            },
+            &listing(Some(128_000)),
+            &cache,
+        )
+        .await;
+    cache.clear();
+    let partial = Listing {
+        body: Some(serde_json::json!({"data":[{"id":"model","max_output_tokens":2048}]})),
+        calls: AtomicUsize::new(0),
+    };
+    let refreshed = resolver
+        .resolve(
+            "route",
+            "model",
+            ContextWindowInput {
+                discovery: Some(&request),
+                ..Default::default()
+            },
+            &partial,
+            &cache,
+        )
+        .await;
+    assert_eq!(refreshed.window, Some(128_000));
+    assert_eq!(refreshed.max_output_tokens, Some(2048));
+    cache.clear();
+    let offline = resolver
+        .resolve(
+            "route",
+            "model",
+            ContextWindowInput {
+                discovery: Some(&request),
+                ..Default::default()
+            },
+            &listing(None),
+            &cache,
+        )
+        .await;
+    assert_eq!(offline, refreshed);
+}
