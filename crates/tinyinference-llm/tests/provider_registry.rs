@@ -1,13 +1,9 @@
 //! Loopback integration coverage of stateless provider construction.
 use tinyinference_llm::providers::openai::codex::OpenAiCodexRouting;
 use tinyinference_llm::providers::registry::{
-    CredentialResolver, ProviderBuildOptions, ProviderRegistry,
+    ProviderBuildOptions, ProviderRegistry,
 };
 use tinyinference_llm::providers::{ProviderKind, ProviderSpec};
-
-fn registry() -> ProviderRegistry<impl CredentialResolver> {
-    ProviderRegistry::new(|_: &ProviderSpec| Ok("\n test-key \r\n".to_string()))
-}
 
 #[tokio::test]
 async fn registry_routes_send_the_configured_wire_request() {
@@ -16,7 +12,7 @@ async fn registry_routes_send_the_configured_wire_request() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    for variant in ["local", "cloud", "codex", "openrouter"] {
+    for variant in ["local", "cloud", "codex", "openrouter", "optional", "local_override", "openrouter_override"] {
         let oauth = variant == "codex";
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -48,13 +44,13 @@ async fn registry_routes_send_the_configured_wire_request() {
             }
         });
         let kind = match variant {
-            "local" => ProviderKind::Ollama,
-            "openrouter" => ProviderKind::OpenRouter,
+            "local" | "local_override" => ProviderKind::Ollama,
+            "openrouter" | "openrouter_override" => ProviderKind::OpenRouter,
             _ => ProviderKind::OpenAi,
         };
         let mut spec = ProviderSpec::for_kind(kind);
         let host = match variant {
-            "openrouter" => "openrouter.ai",
+            "openrouter" | "openrouter_override" => "openrouter.ai",
             _ => "127.0.0.1",
         };
         spec.base_url = format!("http://{host}:{}/v1", address.port());
@@ -65,12 +61,22 @@ async fn registry_routes_send_the_configured_wire_request() {
         };
         let headers = vec![("X-Host".into(), "test-host".into())];
         let query = vec![("client_version".into(), "test-version".into())];
-        let model = registry()
+        spec.requires_api_key = variant != "optional" && spec.requires_api_key;
+        let registry = ProviderRegistry::new(move |_: &ProviderSpec| {
+            Ok(if variant == "optional" { String::new() } else { "test-key".into() })
+        });
+        let supplied_options = match variant {
+            "local_override" => serde_json::json!({"options":{"num_ctx":4096},"seed":7}),
+            "openrouter_override" => serde_json::json!({"provider":{"sort":"latency","only":["DeepInfra"]},"seed":7}),
+            _ => serde_json::json!({"seed":7}),
+        };
+        let model = registry
             .build_with(
                 &spec,
                 ProviderBuildOptions {
                     temperature_override: Some(0.25),
                     num_ctx: Some(8192),
+                    default_provider_options: Some(supplied_options),
                     codex: oauth.then_some(&route),
                     extra_headers: &headers,
                     extra_query_params: &query,
@@ -103,15 +109,21 @@ async fn registry_routes_send_the_configured_wire_request() {
             assert!(body.get("max_output_tokens").is_none());
         } else {
             assert!(header.starts_with("POST /v1/chat/completions?"));
-            if variant == "local" {
+            if variant == "local" || variant == "local_override" || variant == "optional" {
                 assert!(!header.contains("authorization:"));
-                assert_eq!(body["options"]["num_ctx"], 8192);
+                if variant != "optional" {
+                    assert_eq!(body["options"]["num_ctx"], if variant == "local_override" {4096} else {8192});
+                }
             } else {
                 assert!(header.contains("authorization: Bearer test-key"));
             }
-            if variant == "openrouter" {
-                assert_eq!(body["provider"]["sort"], "price");
+            if variant == "openrouter" || variant == "openrouter_override" {
+                assert_eq!(body["provider"]["sort"], if variant == "openrouter_override" {"latency"} else {"price"});
+                if variant == "openrouter_override" {
+                    assert_eq!(body["provider"]["only"], serde_json::json!(["DeepInfra"]));
+                }
             }
+            assert_eq!(body["seed"], 7);
             assert_eq!(body["max_tokens"], 123);
         }
     }
