@@ -40,7 +40,7 @@ async fn registry_routes_send_the_configured_wire_request() {
                     if bytes.len() >= end + 4 + length {
                         let body =
                             serde_json::from_slice::<serde_json::Value>(&bytes[end + 4..]).unwrap();
-                        stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").unwrap();
+                        stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
                         return (header.to_string(), body);
                     }
                 }

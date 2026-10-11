@@ -511,3 +511,7 @@ impl<State: Send + Sync> ChatModel<State> for AnthropicModel {
         })
     }
 }
+
+#[cfg(test)]
+#[path = "identity_tests.rs"]
+mod identity_tests;
