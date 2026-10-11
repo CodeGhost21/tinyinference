@@ -222,3 +222,12 @@ fn native_anthropic_applies_the_vision_override() {
         .unwrap();
     assert!(!model.profile().unwrap().modalities.image_in);
 }
+
+#[test]
+fn local_registry_profiles_leave_unprobed_context_windows_unknown() {
+    for kind in [ProviderKind::Ollama, ProviderKind::LmStudio, ProviderKind::LlamaCpp, ProviderKind::Vllm] {
+        let spec = ProviderSpec::for_kind(kind);
+        let model = registry().build(&spec).unwrap();
+        assert_eq!(model.profile().unwrap().max_input_tokens, None, "{} must not borrow a hosted model window", spec.provider);
+    }
+}
