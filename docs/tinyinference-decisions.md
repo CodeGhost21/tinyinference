@@ -38,6 +38,59 @@ TYPESAFE_API_KEY='<key>' cargo run -p tinyinference-decisions --example basic
 
 The crate is part of the TinyInference workspace and is licensed GPL-3.0-only.
 
+## Local decision models
+
+Use `ClientConfig::self_hosted` for a locally served OpenJEV, Decider, Surogate
+decisions-v1, or another server implementing the Jev-compatible wire contract.
+The URL is the complete POST endpoint: `/v1/systemone`, `/v1/decisions`, or a
+server-specific path. The client adds no path and follows no redirects.
+HTTPS is supported; plain HTTP requires a literal loopback address such as
+`127.0.0.1` or `[::1]`. URLs cannot contain credentials, queries, or fragments.
+
+```rust,no_run
+use std::collections::BTreeMap;
+use serde_json::json;
+use tinyinference_decisions::{Client, ClientConfig, EvaluationRequest, Noul, Question};
+
+# async fn run() -> tinyinference_decisions::Result<()> {
+let client = Client::new(ClientConfig::self_hosted(
+    "http://127.0.0.1:8000/v1/systemone",
+    "", // No Authorization header for a server without authentication.
+))?;
+let request = EvaluationRequest::new(
+    "openjev", // Use the exact model id reported by your server.
+    json!({"ticket": "I was charged twice"}),
+    BTreeMap::from([("duplicate_charge".into(), Question::Noul(Noul {
+        instructions: json!("Was the customer charged twice?"),
+        criteria: None,
+    }))]),
+);
+let result = client.evaluate(&request).await?;
+println!("{:?}", result.response.answers["duplicate_charge"]);
+# Ok(())
+# }
+```
+
+The server must return the requested model id, all requested question ids,
+typed answers, and a `usage` object (which may be empty). Choice distributions,
+Score legends and weighted scores, and Noul probabilities use the same
+validation as hosted Jev. The client preserves server probabilities unchanged.
+An OpenAI chat-completions endpoint or Ollama chat endpoint needs a decisions
+adapter; a model name alone does not make it serve this protocol.
+
+Run the three-question live smoke example against your own server:
+
+```sh
+cargo run -p tinyinference-decisions --example live_local -- \
+  http://127.0.0.1:8000/v1/systemone openjev
+```
+
+It evaluates two synthetic tickets with Choice, Noul, and Score, printing
+validated answers, usage, attempts, and latency. Set `LOCAL_DECISIONS_API_KEY`
+when your server needs a bearer token. Supply the server's own model id in
+place of `openjev`. Runtime installation and model downloads stay outside
+the library.
+
 ## Levanto Sage
 
 Sage is available through `tinyinference_decisions::sage::SageClient`. Its

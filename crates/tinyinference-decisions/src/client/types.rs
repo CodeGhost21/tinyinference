@@ -8,7 +8,7 @@ const DEFAULT_SYSTEM_ONE_PATH: &str = "v1/systemone";
 const TINYHUMANS_SYSTEM_ONE_PATH: &str = "agent-integrations/openrouter/systemone";
 const OPENJEV_BASE_URL: &str = "https://api.openjev.sh";
 
-/// System One API provider.
+/// Hosted or self-hosted System One API provider.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum Provider {
     /// `TypeSafe`'s first-party System One API.
@@ -28,7 +28,7 @@ pub enum Provider {
     SelfHosted,
 }
 
-/// Async `TypeSafe` System One client.
+/// Async Jev-compatible System One client.
 #[derive(Clone)]
 pub struct Client {
     pub(super) config: ClientConfig,

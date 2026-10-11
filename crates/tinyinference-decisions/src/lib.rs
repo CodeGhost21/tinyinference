@@ -1,4 +1,5 @@
-//! Typed Rust access to Jev/System One and Levanto Sage decision models.
+//! Typed Rust access to hosted and local Jev-compatible decision models and
+//! Levanto Sage.
 //!
 //! A request supplies text or structured state plus independent [`Question`]s.
 //! Jev returns typed choices, ordinal scores, and yes/no probabilities for code
@@ -37,6 +38,9 @@
 //! ```
 //!
 //! [`sage`] contains Levanto Sage's Yes/No, Choice, Scale, Sort, and Tags API.
+//! Use [`ClientConfig::self_hosted`] with [`EvaluationRequest::new`] to target
+//! a user-managed OpenJEV or other Jev-compatible decisions endpoint with an
+//! explicit model id and optional bearer authentication.
 //! This crate does not execute selected actions or infer permission from a
 //! decision probability.
 
