@@ -621,7 +621,8 @@ impl OpenAiModel {
     /// a Claude model reached through Chat Completions caches nothing at all.
     /// When enabled and the request
     /// [declares a cacheable prefix][ModelRequest::wants_prompt_cache_breakpoints],
-    /// the last system message and the last user message are rendered as
+    /// the last system message and the last user message (plus the newest
+    /// message of an Anthropic-family request, see `apply_cache_breakpoints`) are rendered as
     /// content parts with a breakpoint on their final text part — the two
     /// placements OpenRouter documents. Hosted OpenAI rejects unknown part
     /// fields, so this stays off unless a preset or the caller turns it on.
@@ -1309,7 +1310,7 @@ impl OpenAiModel {
             })
             .collect::<Result<Vec<_>>>()?;
         if self.wants_cache_breakpoints_for(request) {
-            apply_cache_breakpoints(&mut messages);
+            apply_cache_breakpoints(&mut messages, is_anthropic_model(effective_model));
         }
 
         let mut tools: Vec<ToolWire> = if prompt_guided_tools {
