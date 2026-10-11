@@ -141,27 +141,30 @@ impl ContextWindowResolver {
                 LimitSource::LearnedFromOverflow => WindowSource::LearnedFromOverflow,
                 _ => WindowSource::ProviderReported,
             };
-            let resolved = ResolvedWindow {
-                window: Some(window),
-                source,
-                max_output_tokens,
-            };
-            self.remembered
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .insert(key(provider, model), resolved);
-            return resolved;
-        }
-        {
-            let remembered = self
+            let mut remembered = self
                 .remembered
                 .lock()
                 .unwrap_or_else(|error| error.into_inner());
-            if let Some(resolved) = remembered.get(&key(provider, model)) {
-                return ResolvedWindow {
-                    max_output_tokens: max_output_tokens.or(resolved.max_output_tokens),
-                    ..*resolved
-                };
+            let route_key = key(provider, model);
+            let remembered_cap = remembered
+                .get(&route_key)
+                .and_then(|resolved| resolved.max_output_tokens);
+            let resolved = ResolvedWindow {
+                window: Some(window),
+                source,
+                max_output_tokens: max_output_tokens.or(remembered_cap),
+            };
+            remembered.insert(route_key, resolved);
+            return resolved;
+        }
+        {
+            let mut remembered = self
+                .remembered
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if let Some(resolved) = remembered.get_mut(&key(provider, model)) {
+                resolved.max_output_tokens = max_output_tokens.or(resolved.max_output_tokens);
+                return *resolved;
             }
         }
         let (window, source) =
