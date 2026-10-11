@@ -1,8 +1,6 @@
 //! Loopback integration coverage of stateless provider construction.
 use tinyinference_llm::providers::openai::codex::OpenAiCodexRouting;
-use tinyinference_llm::providers::registry::{
-    ProviderBuildOptions, ProviderRegistry,
-};
+use tinyinference_llm::providers::registry::{ProviderBuildOptions, ProviderRegistry};
 use tinyinference_llm::providers::{ProviderKind, ProviderSpec};
 
 #[tokio::test]
@@ -12,7 +10,15 @@ async fn registry_routes_send_the_configured_wire_request() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    for variant in ["optional", "local", "cloud", "codex", "openrouter", "local_override", "openrouter_override"] {
+    for variant in [
+        "optional",
+        "local",
+        "cloud",
+        "codex",
+        "openrouter",
+        "local_override",
+        "openrouter_override",
+    ] {
         let oauth = variant == "codex";
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
@@ -63,11 +69,17 @@ async fn registry_routes_send_the_configured_wire_request() {
         let query = vec![("client_version".into(), "test-version".into())];
         spec.requires_api_key = variant != "optional" && spec.requires_api_key;
         let registry = ProviderRegistry::new(move |_: &ProviderSpec| {
-            Ok(if variant == "optional" { String::new() } else { "test-key".into() })
+            Ok(if variant == "optional" {
+                String::new()
+            } else {
+                "test-key".into()
+            })
         });
         let supplied_options = match variant {
             "local_override" => serde_json::json!({"options":{"num_ctx":4096},"seed":7}),
-            "openrouter_override" => serde_json::json!({"provider":{"sort":"latency","only":["DeepInfra"]},"seed":7}),
+            "openrouter_override" => {
+                serde_json::json!({"provider":{"sort":"latency","only":["DeepInfra"]},"seed":7})
+            }
             _ => serde_json::json!({"seed":7}),
         };
         let model = registry
@@ -112,13 +124,27 @@ async fn registry_routes_send_the_configured_wire_request() {
             if variant == "local" || variant == "local_override" || variant == "optional" {
                 assert!(!header.contains("authorization:"));
                 if variant != "optional" {
-                    assert_eq!(body["options"]["num_ctx"], if variant == "local_override" {4096} else {8192});
+                    assert_eq!(
+                        body["options"]["num_ctx"],
+                        if variant == "local_override" {
+                            4096
+                        } else {
+                            8192
+                        }
+                    );
                 }
             } else {
                 assert!(header.contains("authorization: Bearer test-key"));
             }
             if variant == "openrouter" || variant == "openrouter_override" {
-                assert_eq!(body["provider"]["sort"], if variant == "openrouter_override" {"latency"} else {"price"});
+                assert_eq!(
+                    body["provider"]["sort"],
+                    if variant == "openrouter_override" {
+                        "latency"
+                    } else {
+                        "price"
+                    }
+                );
                 if variant == "openrouter_override" {
                     assert_eq!(body["provider"]["only"], serde_json::json!(["DeepInfra"]));
                 }

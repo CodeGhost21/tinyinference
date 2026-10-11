@@ -43,7 +43,7 @@ where
 #[derive(Clone, Default)]
 pub struct ProviderBuildOptions<'a> {
     /// Authentication override. Defaults to Anthropic for that family, no
-    /// authentication for local families, and Bearer otherwise.
+    /// authentication for local families or empty optional credentials, and Bearer otherwise.
     pub auth_style: Option<AuthStyle>,
     /// Fixed per-route temperature.
     pub temperature_override: Option<f64>,
@@ -148,7 +148,7 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
         validate(spec)?;
         let key = self.resolve_key(spec)?;
         let endpoint = effective_endpoint(spec, &options);
-        let auth = effective_auth(spec, &options);
+        let auth = effective_auth(spec, &options, &key);
         if matches!(auth, AuthStyle::Anthropic)
             && options.native_tool_calling != Some(false)
             && endpoint_is_anthropic_messages(endpoint)
@@ -171,15 +171,15 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
         }
         let local = is_local(&spec.kind);
         let oauth = options.codex.is_some_and(|routing| routing.using_oauth);
-        let provider_options = options.default_provider_options.clone().or_else(|| {
-            if local {
-                options
-                    .num_ctx
-                    .map(|num_ctx| serde_json::json!({"options": {"num_ctx": num_ctx}}))
-            } else {
-                openrouter_default_provider_options(endpoint)
-            }
-        });
+        let route_options = if local {
+            options
+                .num_ctx
+                .map(|num_ctx| serde_json::json!({"options": {"num_ctx": num_ctx}}))
+        } else {
+            openrouter_default_provider_options(endpoint)
+        };
+        let provider_options =
+            merge_route_options(route_options, options.default_provider_options.clone());
         Ok(super::openai::config::build_openai_model_with(
             OpenAiConfig {
                 provider_name: &spec.provider,
@@ -228,7 +228,7 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
         let endpoint = effective_endpoint(spec, options);
         let mut request = DiscoveryRequest::new(endpoint, &spec.model);
         if !key.trim().is_empty() {
-            request = match effective_auth(spec, options) {
+            request = match effective_auth(spec, options, &key) {
                 AuthStyle::None => request,
                 AuthStyle::Bearer => {
                     request.with_header("Authorization", format!("Bearer {}", key.trim()))
@@ -299,9 +299,30 @@ fn effective_endpoint<'a>(
         .map_or(&spec.base_url, |route| &route.endpoint)
 }
 
-fn effective_auth(spec: &ProviderSpec, options: &ProviderBuildOptions<'_>) -> AuthStyle {
+// Route defaults form a base; host settings override only the fields supplied.
+fn merge_route_options(
+    defaults: Option<serde_json::Value>,
+    overrides: Option<serde_json::Value>,
+) -> Option<serde_json::Value> {
+    match (defaults, overrides) {
+        (Some(serde_json::Value::Object(mut base)), Some(serde_json::Value::Object(over))) => {
+            for (key, value) in over {
+                let previous = base.remove(&key);
+                base.insert(
+                    key,
+                    merge_route_options(previous, Some(value)).expect("override is present"),
+                );
+            }
+            Some(serde_json::Value::Object(base))
+        }
+        (base, None | Some(serde_json::Value::Null)) => base,
+        (_, over) => over,
+    }
+}
+
+fn effective_auth(spec: &ProviderSpec, options: &ProviderBuildOptions<'_>, key: &str) -> AuthStyle {
     options.auth_style.clone().unwrap_or_else(|| {
-        if is_local(&spec.kind) {
+        if is_local(&spec.kind) || (!spec.requires_api_key && key.is_empty()) {
             AuthStyle::None
         } else if spec.kind == ProviderKind::Anthropic {
             AuthStyle::Anthropic
