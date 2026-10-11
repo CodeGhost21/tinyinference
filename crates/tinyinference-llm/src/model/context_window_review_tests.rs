@@ -450,12 +450,31 @@ async fn resolver_debug_omits_discovery_credentials_and_urls() {
         .with_listing_url("https://listing.test/models?api_key=synthetic-secret")
         .with_single_model_probe(false)
         .with_ollama_native(false);
-    resolver.resolve("route", "model", ContextWindowInput {
-        discovery: Some(&request), ..Default::default()
-    }, &listing(Some(serde_json::json!({"data":[{"id":"model","context_length":128000}]}))), &ModelLimitsCache::default()).await;
+    resolver
+        .resolve(
+            "route",
+            "model",
+            ContextWindowInput {
+                discovery: Some(&request),
+                ..Default::default()
+            },
+            &listing(Some(
+                serde_json::json!({"data":[{"id":"model","context_length":128000}]}),
+            )),
+            &ModelLimitsCache::default(),
+        )
+        .await;
     let debug = format!("{resolver:?}");
-    for secret in ["password", "synthetic-secret", "example.test", "listing.test"] {
-        assert!(!debug.contains(secret), "resolver debug disclosed discovery identity");
+    for secret in [
+        "password",
+        "synthetic-secret",
+        "example.test",
+        "listing.test",
+    ] {
+        assert!(
+            !debug.contains(secret),
+            "resolver debug disclosed discovery identity"
+        );
     }
 }
 
@@ -483,7 +502,10 @@ impl ModelListingFetcher for HeldProbe {
 async fn clear_during_target_probe_does_not_publish_sibling_limits() {
     let resolver = Arc::new(ContextWindowResolver::new());
     let cache = Arc::new(ModelLimitsCache::default());
-    let fetcher = Arc::new(HeldProbe { started: Notify::new(), release: Notify::new() });
+    let fetcher = Arc::new(HeldProbe {
+        started: Notify::new(),
+        release: Notify::new(),
+    });
     let request = request().with_single_model_probe(true);
     let task = {
         let resolver = resolver.clone();
@@ -491,24 +513,55 @@ async fn clear_during_target_probe_does_not_publish_sibling_limits() {
         let fetcher = fetcher.clone();
         let request = request.clone();
         tokio::spawn(async move {
-            resolver.resolve("route", "model", ContextWindowInput {
-                discovery: Some(&request), ..Default::default()
-            }, fetcher.as_ref(), cache.as_ref()).await
+            resolver
+                .resolve(
+                    "route",
+                    "model",
+                    ContextWindowInput {
+                        discovery: Some(&request),
+                        ..Default::default()
+                    },
+                    fetcher.as_ref(),
+                    cache.as_ref(),
+                )
+                .await
         })
     };
     fetcher.started.notified().await;
-    let premature = cache.get_variant(&request.endpoint, "sibling", &request.cache_variant()).discovered.is_some();
+    let premature = cache
+        .get_variant(&request.endpoint, "sibling", &request.cache_variant())
+        .discovered
+        .is_some();
     resolver.clear();
     fetcher.release.notify_one();
     task.await.unwrap();
-    assert!(!premature, "sibling limits must wait for the final discovery commit");
-    assert!(cache.get_variant(&request.endpoint, "sibling", &request.cache_variant()).discovered.is_none());
+    assert!(
+        !premature,
+        "sibling limits must wait for the final discovery commit"
+    );
+    assert!(
+        cache
+            .get_variant(&request.endpoint, "sibling", &request.cache_variant())
+            .discovered
+            .is_none()
+    );
     let mut sibling = request;
     sibling.model = "sibling".into();
-    let fresh = listing(Some(serde_json::json!({"data":[{"id":"sibling","context_length":64000,"max_output_tokens":2048}]})));
-    let resolved = resolver.resolve("route", "sibling", ContextWindowInput {
-        discovery: Some(&sibling), ..Default::default()
-    }, &fresh, cache.as_ref()).await;
+    let fresh = listing(Some(
+        serde_json::json!({"data":[{"id":"sibling","context_length":64000,"max_output_tokens":2048}]}),
+    ));
+    let resolved = resolver
+        .resolve(
+            "route",
+            "sibling",
+            ContextWindowInput {
+                discovery: Some(&sibling),
+                ..Default::default()
+            },
+            &fresh,
+            cache.as_ref(),
+        )
+        .await;
     assert_eq!(resolved.window, Some(64000));
     assert_eq!(fresh.calls.load(Ordering::SeqCst), 1);
 }

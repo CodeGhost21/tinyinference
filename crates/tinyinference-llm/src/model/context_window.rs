@@ -77,8 +77,9 @@ pub struct ContextWindowInput<'a> {
 /// overrides and fallback guesses are evaluated anew on every call. Keys are
 /// trimmed and ASCII-folded. A discovery identity additionally includes its
 /// endpoint, target model and cache variant (listing/probe/provider/credential
-/// scope), preventing fallback across different resolved requests.
-#[derive(Debug, Default)]
+/// scope), preventing fallback across different resolved requests. Debug output
+/// reports counts only, omitting discovery identities that may contain secrets.
+#[derive(Default)]
 pub struct ContextWindowResolver {
     state: Mutex<ResolverState>,
 }
@@ -99,6 +100,17 @@ struct RememberedKey {
 struct RememberedLimits {
     window: Option<(u64, WindowSource)>,
     max_output_tokens: Option<u64>,
+}
+
+impl std::fmt::Debug for ContextWindowResolver {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
+        formatter
+            .debug_struct("ContextWindowResolver")
+            .field("generation", &state.generation)
+            .field("remembered_count", &state.remembered.len())
+            .finish_non_exhaustive()
+    }
 }
 
 impl ContextWindowResolver {

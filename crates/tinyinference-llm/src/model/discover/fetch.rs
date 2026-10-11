@@ -196,14 +196,16 @@ pub(crate) async fn discover_model_limits_with_guard(
         return cached.effective();
     }
     let started = std::time::Instant::now();
+    let mut siblings = Vec::new();
     let limits = match tokio::time::timeout(
         request.timeout,
-        fetch_limits(fetcher, cache, request, access),
+        fetch_limits(fetcher, request, &mut siblings),
     )
     .await
     {
         Ok(limits) => limits,
         Err(_) => {
+            siblings.clear();
             tracing::warn!(
                 endpoint = %request.endpoint,
                 model = %request.model,
@@ -224,6 +226,11 @@ pub(crate) async fn discover_model_limits_with_guard(
     );
     let mut resolved = limits.clone();
     access(&mut || {
+        // Publish all listing facts only after every probe completes and the
+        // caller's generation is still current. No stale sibling survives clear.
+        for (id, limits) in &siblings {
+            cache.insert_discovered_variant(&request.endpoint, id, &variant, Some(limits.clone()));
+        }
         cache.insert_discovered_variant(
             &request.endpoint,
             &request.model,
@@ -247,9 +254,8 @@ pub async fn discover_model_limits(
 
 async fn fetch_limits(
     fetcher: &dyn ModelListingFetcher,
-    cache: &ModelLimitsCache,
     request: &DiscoveryRequest,
-    access: &CacheAccess<'_>,
+    siblings: &mut Vec<(String, ModelLimits)>,
 ) -> Option<ModelLimits> {
     let listing_url = request.effective_listing_url();
     let mut found = match fetcher.get_json(&listing_url, &request.headers).await {
@@ -263,7 +269,6 @@ async fn fetch_limits(
             // Listing-level limits are the broad (unpinned) answer; never
             // prime them for a pinned request, which needs endpoint limits.
             if request.pinned_providers.is_empty() {
-                let variant = request.cache_variant();
                 for (id, limits) in listed {
                     // A partial entry (no window) must not become a finished
                     // discovery for its model when the native probe could still
@@ -272,14 +277,7 @@ async fn fetch_limits(
                         continue;
                     }
                     if !model_ids_match(&id, &request.model) {
-                        access(&mut || {
-                            cache.insert_discovered_variant(
-                                &request.endpoint,
-                                &id,
-                                &variant,
-                                Some(limits.clone()),
-                            )
-                        });
+                        siblings.push((id, limits));
                     }
                 }
             }
