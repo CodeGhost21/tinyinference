@@ -2,7 +2,8 @@ use super::*;
 
 #[test]
 fn status_gates_pin_budget_local_policy_credits_and_moderation_facts() {
-    let cases: &[(&str, u16, fn(ProviderHttpFailureFacts) -> bool)] = &[
+    type Case<'a> = (&'a str, u16, fn(ProviderHttpFailureFacts) -> bool);
+    let cases: &[Case<'_>] = &[
         ("Insufficient budget", 400, |facts| facts.budget_exhausted),
         (
             "No models loaded. Please load a model in the developer page or via lms load.",

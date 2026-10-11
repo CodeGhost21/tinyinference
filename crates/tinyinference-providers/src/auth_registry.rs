@@ -25,7 +25,7 @@ pub struct ProviderAuthError {
 ///
 /// Repeated records refresh the entry without opening a new episode. Clearing
 /// it re-arms the first-failure latch, allowing the host to notify once again.
-/// Poisoned locks recover their contents, matching the persisted process
+/// Poisoned locks recover their contents, matching the process-lived
 /// registry behavior expected by hosts.
 #[derive(Debug, Default)]
 pub struct ProviderAuthErrorRegistry {
