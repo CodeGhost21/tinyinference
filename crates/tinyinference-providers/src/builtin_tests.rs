@@ -34,12 +34,7 @@ fn builtin_cloud_provider_defaults_cover_phase_one_presets() {
             BuiltinAuthStyle::Bearer,
         ),
     ] {
-        let mut entry = CloudProviderCreds {
-            id: format!("p_{slug}"),
-            legacy_type: Some(slug.to_string()),
-            ..Default::default()
-        };
-        migrate_legacy_fields(&mut entry);
+        let entry = builtin_cloud_provider(slug).expect("known preset");
 
         assert_eq!(entry.slug, slug);
         assert_eq!(entry.label, label);
