@@ -663,18 +663,3 @@ pub(super) fn translate_deepseek_message(message: &Message) -> Result<ChatMessag
     }
     Ok(wire)
 }
-
-/// DeepSeek cannot enter thinking mode during a tool chain that contains an
-/// unreasoned assistant tool call. A new user turn ends that constraint.
-pub(super) fn deepseek_unreasoned_tool_chain(messages: &[Message]) -> bool {
-    messages
-        .iter()
-        .rev()
-        .take_while(|message| !matches!(message, Message::User(_)))
-        .any(|message| {
-            matches!(message, Message::Assistant(assistant)
-            if !assistant.tool_calls.is_empty()
-                && !assistant.content.iter().any(|block|
-                    block.as_thinking().is_some_and(|(text, _)| !text.is_empty())))
-        })
-}

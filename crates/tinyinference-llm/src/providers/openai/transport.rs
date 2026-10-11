@@ -1381,7 +1381,7 @@ impl OpenAiModel {
             merge_provider_options(&self.default_provider_options, &request.provider_options);
         let mut extra = provider_extra_options(&merged_provider_options)?;
         let openrouter_budget = openrouter_reasoning_budget(&self.base_url, request, &extra);
-        let mut reasoning_effort = if openrouter_budget.is_some()
+        let reasoning_effort = if openrouter_budget.is_some()
             || merged_provider_options
                 .get("reasoning_effort")
                 .is_some_and(|value| !value.is_null())
@@ -1400,17 +1400,6 @@ impl OpenAiModel {
                 "[openai] openrouter reasoning budget sent as reasoning.max_tokens"
             );
             extra.insert("reasoning".to_string(), json!({ "max_tokens": budget }));
-        }
-
-        if deepseek && deepseek_unreasoned_tool_chain(source_messages) {
-            // The recovery may have spent its hold-off and requested thinking
-            // again, but the provider rejects a mixed-mode tool chain. Do not
-            // invent reasoning for the earlier unreasoned assistant message.
-            // Remove competing provider options so this wire constraint wins.
-            extra.remove("reasoning");
-            extra.remove("reasoning_effort");
-            extra.remove("thinking");
-            reasoning_effort = Some(crate::model::ReasoningEffort::None);
         }
 
         Ok(ChatCompletionRequest {
