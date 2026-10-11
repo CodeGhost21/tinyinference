@@ -565,3 +565,27 @@ async fn clear_during_target_probe_does_not_publish_sibling_limits() {
     assert_eq!(resolved.window, Some(64000));
     assert_eq!(fresh.calls.load(Ordering::SeqCst), 1);
 }
+
+#[test]
+fn regression_input_debug_omits_discovery_credentials() {
+    let request = DiscoveryRequest::new(
+        "https://endpoint-user:endpoint-password@example.test/v1?key=endpoint-key",
+        "model",
+    )
+    .with_listing_url("https://listing-user:listing-password@listing.test/models?key=listing-key#listing-fragment")
+    .with_header("Authorization", "header-secret");
+    let input = ContextWindowInput {
+        config_override: Some(8192),
+        discovery: Some(&request),
+        ..Default::default()
+    };
+    let debug = format!("{input:?}");
+    for secret in [
+        "endpoint-user", "endpoint-password", "endpoint-key",
+        "listing-user", "listing-password", "listing-key",
+        "listing-fragment", "header-secret",
+    ] {
+        assert!(!debug.contains(secret), "input debug disclosed credentials");
+    }
+    assert!(debug.contains("8192"));
+}

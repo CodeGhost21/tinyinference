@@ -618,3 +618,51 @@ fn ollama_endpoints_are_detected_from_the_url() {
         assert!(!crate::model::discover::looks_like_ollama(no), "{no}");
     }
 }
+
+struct ListingThenHungProbe;
+
+#[async_trait]
+impl ModelListingFetcher for ListingThenHungProbe {
+    async fn get_json(&self, url: &str, _: &[(String, String)]) -> crate::Result<Value> {
+        if url.ends_with("/models") {
+            Ok(json!({"data": [
+                {"id": "target", "max_output_tokens": 2048},
+                {"id": "sibling", "context_length": 96000, "max_output_tokens": 4096}
+            ]}))
+        } else {
+            futures::future::pending().await
+        }
+    }
+
+    async fn post_json(
+        &self,
+        _: &str,
+        _: &[(String, String)],
+        _: &Value,
+    ) -> crate::Result<Value> {
+        futures::future::pending().await
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn regression_target_timeout_preserves_completed_sibling_records() {
+    for single_model in [true, false] {
+        let cache = cache();
+        let request = DiscoveryRequest::new(ENDPOINT, "target")
+            .with_single_model_probe(single_model)
+            .with_ollama_native(!single_model)
+            .with_timeout(Duration::from_millis(50));
+        assert!(discover_model_limits_with(&ListingThenHungProbe, &cache, &request).await.is_none());
+        assert_eq!(
+            cache.get_variant(ENDPOINT, "target", &request.cache_variant()).discovered,
+            Some(None),
+        );
+        let mut sibling = request;
+        sibling.model = "sibling".into();
+        let offline = FakeFetcher::default();
+        let limits = discover_model_limits_with(&offline, &cache, &sibling).await.unwrap();
+        assert_eq!(limits.context_window, Some(96000));
+        assert_eq!(limits.max_output_tokens, Some(4096));
+        assert!(offline.calls().is_empty());
+    }
+}
