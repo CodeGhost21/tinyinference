@@ -148,7 +148,8 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
     ) -> Result<Arc<dyn ChatModel<()>>> {
         validate(spec)?;
         let key = self.resolve_key(spec)?;
-        let endpoint = effective_endpoint(spec, &options);
+        let endpoint = effective_endpoint(spec, &options).trim();
+        let model = spec.model.trim();
         let auth = effective_auth(spec, &options, &key);
         if matches!(auth, AuthStyle::Anthropic)
             && options.native_tool_calling != Some(false)
@@ -159,7 +160,7 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
                     AnthropicConfig {
                         endpoint,
                         api_key: &key,
-                        model: &spec.model,
+                        model,
                         temperature_override: options.temperature_override,
                         temperature_unsupported_models: options.temperature_unsupported_models,
                         extra_headers: options.extra_headers,
@@ -207,7 +208,7 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
             endpoint,
             api_key: &key,
             auth_style: auth.clone(),
-            model: &spec.model,
+            model,
             temperature_unsupported_models: options.temperature_unsupported_models,
             temperature_override: options.temperature_override,
             merge_system_into_user: options.merge_system_into_user,
@@ -224,6 +225,7 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
         if local {
             let mut resolved = spec.clone();
             resolved.base_url = endpoint.to_owned();
+            resolved.model = model.to_owned();
             let model =
                 super::openai::OpenAiModel::from_spec(resolved, &key)?.with_auth_style(auth);
             let mut model =
@@ -263,13 +265,14 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
         spec: &ProviderSpec,
         options: &ProviderBuildOptions<'_>,
     ) -> Result<Option<DiscoveryRequest>> {
-        validate(spec)?;
         if is_local(&spec.kind) || options.codex.is_some_and(|route| route.using_oauth) {
             return Ok(None);
         }
+        validate(spec)?;
         let key = self.resolve_key(spec)?;
-        let endpoint = effective_endpoint(spec, options);
-        let mut request = DiscoveryRequest::new(endpoint, &spec.model);
+        let endpoint = effective_endpoint(spec, options).trim();
+        let model = spec.model.trim();
+        let mut request = DiscoveryRequest::new(endpoint, model);
         if !key.trim().is_empty() {
             request = match effective_auth(spec, options, &key) {
                 AuthStyle::None => request,
@@ -284,7 +287,7 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
             };
         }
         for (name, value) in options.extra_headers {
-            request = request.with_header(name, value);
+            request = with_replaced_header(request, name, value);
         }
         if let Some(provider_options) = options
             .default_provider_options
@@ -306,6 +309,17 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
         }
         Ok(key.trim().to_string())
     }
+}
+
+fn with_replaced_header(
+    mut request: DiscoveryRequest,
+    name: &str,
+    value: &str,
+) -> DiscoveryRequest {
+    request
+        .headers
+        .retain(|(existing, _)| !existing.eq_ignore_ascii_case(name));
+    request.with_header(name, value)
 }
 
 /// Stable price ordering for direct OpenRouter routes; request-specific
