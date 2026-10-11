@@ -137,6 +137,9 @@ impl ContextWindowResolver {
     /// route/model lookup projects the smallest observed window and output cap;
     /// callers requiring exact routed facts must supply the resolved request.
     /// Partial discovery can supply an output ceiling independently of the window.
+    /// A positive override performs no network discovery, but preserves a positive
+    /// output ceiling already in the matching discovery-cache slot or remembered
+    /// state. It never remembers the explicit context override.
     /// Discovery bounds/caching come from the request and `ModelLimitsCache`. No diagnostics
     /// or telemetry are emitted: hosts use the returned source label.
     pub async fn resolve(
@@ -150,7 +153,23 @@ impl ContextWindowResolver {
         let route_key = remembered_key(provider, model, input.discovery);
         let (generation, remembered_cap) = {
             let state = self.state.lock().unwrap_or_else(|error| error.into_inner());
-            (state.generation, state.lookup(&route_key).max_output_tokens)
+            let cached_cap = if input.config_override.is_some_and(|window| window > 0) {
+                // Cache-only lookup under the same generation guard as discovery:
+                // no fetch and no remembered-window write for explicit overrides.
+                input.discovery.and_then(|request| {
+                    cache
+                        .get_variant(&request.endpoint, &request.model, &request.cache_variant())
+                        .effective()
+                        .and_then(|limits| limits.max_output_tokens)
+                        .filter(|tokens| *tokens > 0)
+                })
+            } else {
+                None
+            };
+            (
+                state.generation,
+                cached_cap.or(state.lookup(&route_key).max_output_tokens),
+            )
         };
         if let Some(window) = input.config_override.filter(|window| *window > 0) {
             return ResolvedWindow {

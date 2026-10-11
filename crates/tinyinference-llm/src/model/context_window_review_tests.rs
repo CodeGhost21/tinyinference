@@ -399,3 +399,46 @@ async fn first_override_reuses_matching_sibling_cache_cap_without_fetching() {
     assert_eq!(other.max_output_tokens, None);
     assert_eq!(offline.calls.load(Ordering::SeqCst), 0);
 }
+
+#[tokio::test]
+async fn identity_free_lookup_projects_smallest_observed_limits_without_changing_exact_routes() {
+    let resolver = ContextWindowResolver::new();
+    let cache = ModelLimitsCache::default();
+    let first = request();
+    let second = request().with_header("x-tenant", "second");
+    for (request, window, cap) in [(&first, 128000, 4096), (&second, 64000, 2048)] {
+        resolver.resolve("route", "model", ContextWindowInput {
+            discovery: Some(request), ..Default::default()
+        }, &listing(Some(serde_json::json!({"data":[{"id":"model","context_length":window,"max_output_tokens":cap}]}))), &cache).await;
+    }
+    assert_eq!(resolver.remembered_window(" ROUTE ", "MODEL"), Some(64000));
+    let offline = listing(None);
+    let projected = resolver
+        .resolve(
+            "route",
+            "model",
+            ContextWindowInput::default(),
+            &offline,
+            &cache,
+        )
+        .await;
+    assert_eq!(projected.window, Some(64000));
+    assert_eq!(projected.max_output_tokens, Some(2048));
+    cache.clear();
+    let exact = resolver
+        .resolve(
+            "route",
+            "model",
+            ContextWindowInput {
+                discovery: Some(&first),
+                ..Default::default()
+            },
+            &offline,
+            &cache,
+        )
+        .await;
+    assert_eq!(exact.window, Some(128000));
+    assert_eq!(exact.max_output_tokens, Some(4096));
+    resolver.clear();
+    assert_eq!(resolver.remembered_window("route", "model"), None);
+}
