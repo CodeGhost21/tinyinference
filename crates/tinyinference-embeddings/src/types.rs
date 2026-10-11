@@ -269,12 +269,11 @@ pub trait EmbeddingModel: Send + Sync {
 /// key, and vectors from both would then be compared as though they came from
 /// the same model.
 ///
-/// Encoding only those three characters is what keeps this from being a
-/// migration. Every provider and model identifier actually in use is
-/// alphanumeric plus `-`, `_`, `.`, `/` or `:`, and each of those passes
-/// through untouched — so every signature already on disk still formats to the
-/// same bytes. Only a name that could have collided changes, and such a name
-/// has never been written.
+/// Identifiers without those three characters retain their previous bytes,
+/// including identifiers containing `-`, `_`, `.`, `/` or `:`. This format
+/// matches OpenHuman's persisted signature contract. TinyInference signatures
+/// previously generated with delimiter-bearing identifiers change and require
+/// consumers to migrate those keys or re-embed their vectors.
 #[must_use]
 pub fn format_embedding_signature(name: &str, model_id: &str, dims: usize) -> String {
     let name = escape_component(name);
