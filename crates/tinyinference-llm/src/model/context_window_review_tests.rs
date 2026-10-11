@@ -293,3 +293,109 @@ async fn clear_prevents_pending_discovery_from_poisoning_reused_cache() {
         assert_eq!(resolver.remembered_window("route", "model"), Some(64000));
     }
 }
+
+#[tokio::test]
+async fn remembered_limits_do_not_cross_discovery_identity() {
+    let original = request().with_header("Authorization", "Bearer tenant-a");
+    let variants = [
+        request().with_header("Authorization", "Bearer tenant-b"),
+        original
+            .clone()
+            .with_pinned_providers(vec!["provider-b".into()]),
+        DiscoveryRequest::new("https://other.example/v1", "model")
+            .with_single_model_probe(false)
+            .with_ollama_native(false)
+            .with_header("Authorization", "Bearer tenant-a"),
+    ];
+    for variant in variants {
+        let resolver = ContextWindowResolver::new();
+        let cache = ModelLimitsCache::default();
+        let first = resolver.resolve("route", "model", ContextWindowInput {
+            discovery: Some(&original), ..Default::default()
+        }, &listing(Some(serde_json::json!({"data":[{"id":"model","context_length":128000,"max_output_tokens":4096}]}))), &cache).await;
+        assert_eq!(first.window, Some(128000));
+        let offline = listing(None);
+        for config_override in [None, Some(32000)] {
+            let different = resolver
+                .resolve(
+                    "route",
+                    "model",
+                    ContextWindowInput {
+                        discovery: Some(&variant),
+                        config_override,
+                        static_window: Some(16000),
+                        ..Default::default()
+                    },
+                    &offline,
+                    &cache,
+                )
+                .await;
+            assert_eq!(different.window, config_override.or(Some(16000)));
+            assert_eq!(different.max_output_tokens, None);
+        }
+        cache.clear();
+        let same = resolver
+            .resolve(
+                " ROUTE ",
+                "MODEL",
+                ContextWindowInput {
+                    discovery: Some(&original),
+                    ..Default::default()
+                },
+                &offline,
+                &cache,
+            )
+            .await;
+        assert_eq!(same.window, Some(128000));
+        assert_eq!(same.max_output_tokens, Some(4096));
+    }
+}
+
+#[tokio::test]
+async fn first_override_reuses_matching_sibling_cache_cap_without_fetching() {
+    let cache = ModelLimitsCache::default();
+    let target = request().with_header("Authorization", "Bearer tenant-a");
+    let mut sibling = target.clone();
+    sibling.model = "sibling".into();
+    let priming = listing(Some(serde_json::json!({"data":[
+        {"id":"sibling","context_length":96000},
+        {"id":"model","context_length":128000,"max_output_tokens":4096}
+    ]})));
+    super::super::discover::discover_model_limits_with(&priming, &cache, &sibling).await;
+    let resolver = ContextWindowResolver::new();
+    let offline = listing(None);
+    let result = resolver
+        .resolve(
+            "new-route",
+            "model",
+            ContextWindowInput {
+                config_override: Some(200000),
+                discovery: Some(&target),
+                ..Default::default()
+            },
+            &offline,
+            &cache,
+        )
+        .await;
+    assert_eq!(result.window, Some(200000));
+    assert_eq!(result.source, WindowSource::ConfigOverride);
+    assert_eq!(result.max_output_tokens, Some(4096));
+    assert_eq!(offline.calls.load(Ordering::SeqCst), 0);
+    assert_eq!(resolver.remembered_window("new-route", "model"), None);
+    let other = target.with_header("x-tenant", "other");
+    let other = resolver
+        .resolve(
+            "new-route",
+            "model",
+            ContextWindowInput {
+                config_override: Some(200000),
+                discovery: Some(&other),
+                ..Default::default()
+            },
+            &offline,
+            &cache,
+        )
+        .await;
+    assert_eq!(other.max_output_tokens, None);
+    assert_eq!(offline.calls.load(Ordering::SeqCst), 0);
+}
