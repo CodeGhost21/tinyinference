@@ -212,3 +212,77 @@ async fn clear_prevents_pending_discovery_from_repopulating_previous_identity() 
         assert_eq!(next.max_output_tokens, replace.then_some(2048));
     }
 }
+
+#[tokio::test]
+async fn clear_prevents_pending_discovery_from_poisoning_reused_cache() {
+    for replace_before_completion in [false, true] {
+        let resolver = Arc::new(ContextWindowResolver::new());
+        let cache = Arc::new(ModelLimitsCache::default());
+        let old = Arc::new(HeldListing {
+            started: Notify::new(),
+            release: Notify::new(),
+        });
+        let task = {
+            let resolver = resolver.clone();
+            let cache = cache.clone();
+            let old = old.clone();
+            tokio::spawn(async move {
+                let request = request();
+                resolver
+                    .resolve(
+                        "route",
+                        "model",
+                        ContextWindowInput {
+                            discovery: Some(&request),
+                            ..Default::default()
+                        },
+                        old.as_ref(),
+                        cache.as_ref(),
+                    )
+                    .await
+            })
+        };
+        old.started.notified().await;
+        resolver.clear();
+        let fresh = listing(Some(
+            serde_json::json!({"data":[{"id":"model","context_length":64000,"max_output_tokens":2048}]}),
+        ));
+        let request = request();
+        if replace_before_completion {
+            assert_eq!(
+                resolver
+                    .resolve(
+                        "route",
+                        "model",
+                        ContextWindowInput {
+                            discovery: Some(&request),
+                            ..Default::default()
+                        },
+                        &fresh,
+                        cache.as_ref()
+                    )
+                    .await
+                    .window,
+                Some(64000)
+            );
+        }
+        old.release.notify_one();
+        let _ = task.await.unwrap();
+        let result = resolver
+            .resolve(
+                "route",
+                "model",
+                ContextWindowInput {
+                    discovery: Some(&request),
+                    ..Default::default()
+                },
+                &fresh,
+                cache.as_ref(),
+            )
+            .await;
+        assert_eq!(result.window, Some(64000));
+        assert_eq!(result.max_output_tokens, Some(2048));
+        assert_eq!(fresh.calls.load(Ordering::SeqCst), 1);
+        assert_eq!(resolver.remembered_window("route", "model"), Some(64000));
+    }
+}
