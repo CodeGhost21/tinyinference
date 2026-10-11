@@ -2,7 +2,8 @@ use super::*;
 
 fn entry(provider: &str, status: u16, timestamp_ms: u64) -> ProviderAuthError {
     ProviderAuthError {
-        provider: provider.into(), status,
+        provider: provider.into(),
+        status,
         message: format!("{provider} rejected the supplied credential"),
         timestamp_ms,
     }
@@ -14,7 +15,10 @@ fn record_returns_true_only_on_first_episode_and_refreshes_status_and_timestamp(
     assert!(registry.record(entry("openrouter", 401, 10)));
     assert!(!registry.record(entry("openrouter", 403, 20)));
     assert!(registry.record(entry("openai", 401, 30)));
-    assert_eq!(registry.snapshot(), vec![entry("openai", 401, 30), entry("openrouter", 403, 20)]);
+    assert_eq!(
+        registry.snapshot(),
+        vec![entry("openai", 401, 30), entry("openrouter", 403, 20)]
+    );
 }
 
 #[test]
@@ -46,17 +50,25 @@ fn snapshot_preserves_host_serialized_shape_and_message() {
         "message": "Reconnect this provider.", "timestamp_ms": 123
     });
     registry.record(serde_json::from_value(expected.clone()).unwrap());
-    assert_eq!(serde_json::to_value(registry.snapshot()[0].clone()).unwrap(), expected);
+    assert_eq!(
+        serde_json::to_value(registry.snapshot()[0].clone()).unwrap(),
+        expected
+    );
 }
 
 #[test]
 fn concurrent_records_open_only_one_episode() {
     let registry = std::sync::Arc::new(ProviderAuthErrorRegistry::new());
-    let threads: Vec<_> = (0..16).map(|timestamp| {
-        let registry = registry.clone();
-        std::thread::spawn(move || registry.record(entry("openrouter", 401, timestamp)))
-    }).collect();
-    let new_episodes = threads.into_iter().map(|thread| thread.join().unwrap() as usize).sum::<usize>();
+    let threads: Vec<_> = (0..16)
+        .map(|timestamp| {
+            let registry = registry.clone();
+            std::thread::spawn(move || registry.record(entry("openrouter", 401, timestamp)))
+        })
+        .collect();
+    let new_episodes = threads
+        .into_iter()
+        .map(|thread| thread.join().unwrap() as usize)
+        .sum::<usize>();
     assert_eq!(new_episodes, 1);
     assert_eq!(registry.snapshot().len(), 1);
 }

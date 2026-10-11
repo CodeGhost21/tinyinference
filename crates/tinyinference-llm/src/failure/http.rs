@@ -45,22 +45,29 @@ pub struct ProviderHttpFailureFacts {
 pub fn classify_http_failure(provider: &str, status: u16, body: &str) -> ProviderHttpFailureFacts {
     let config_status = matches!(status, 400 | 403 | 404 | 422);
     ProviderHttpFailureFacts {
-        budget_exhausted: status == 400 && tinyinference_providers::is_budget_exhausted_message(body),
+        budget_exhausted: status == 400
+            && tinyinference_providers::is_budget_exhausted_message(body),
         no_model_loaded: status == 400 && super::body_indicates_no_model_loaded(body),
-        custom_upstream_bad_request: provider == "custom_openai" && status == 400
+        custom_upstream_bad_request: provider == "custom_openai"
+            && status == 400
             && super::body_indicates_custom_openai_upstream_bad_request(body),
-        access_policy_denied: status == 403 && super::body_indicates_provider_access_policy_denied(body),
-        configuration_rejected: config_status && tinyinference_providers::is_provider_config_rejection_message(body),
-        unknown_model: config_status && tinyinference_providers::is_openai_compatible_unknown_model_message(body),
+        access_policy_denied: status == 403
+            && super::body_indicates_provider_access_policy_denied(body),
+        configuration_rejected: config_status
+            && tinyinference_providers::is_provider_config_rejection_message(body),
+        unknown_model: config_status
+            && tinyinference_providers::is_openai_compatible_unknown_model_message(body),
         context_window_exceeded: super::is_context_window_exceeded_message(body),
         quota_exhausted: super::body_indicates_quota_exhausted(body),
-        api_key_rejected: matches!(status, 401 | 403) && (
-            super::body_indicates_auth_key_error(body)
-            || (provider == "openrouter" && body.to_ascii_lowercase().contains("user not found"))
-        ),
-        oauth_session_expired: status == 401 && tinyinference_providers::is_openai_oauth_session_expired_message(body),
+        api_key_rejected: matches!(status, 401 | 403)
+            && (super::body_indicates_auth_key_error(body)
+                || (provider == "openrouter"
+                    && body.to_ascii_lowercase().contains("user not found"))),
+        oauth_session_expired: status == 401
+            && tinyinference_providers::is_openai_oauth_session_expired_message(body),
         insufficient_credits: status == 402 && super::body_indicates_insufficient_credits(body),
-        ollama_cloud_internal_error: provider == "ollama" && status == 500
+        ollama_cloud_internal_error: provider == "ollama"
+            && status == 500
             && super::body_indicates_ollama_cloud_internal_error(body),
         moderation_rejected: status == 400 && super::body_indicates_moderation_rejection(body),
     }
@@ -113,7 +120,13 @@ pub fn classify_and_report_http_failure(
     reporter: &dyn ErrorReporter,
 ) -> ProviderHttpFailureFacts {
     let facts = classify_http_failure(provider, status, body);
-    reporter.report(ProviderHttpFailure { provider, operation, model, status, facts });
+    reporter.report(ProviderHttpFailure {
+        provider,
+        operation,
+        model,
+        status,
+        facts,
+    });
     facts
 }
 

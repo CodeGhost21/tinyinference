@@ -40,7 +40,10 @@ impl ProviderAuthErrorRegistry {
 
     /// Stores a failure and returns true only for a new episode.
     pub fn record(&self, entry: ProviderAuthError) -> bool {
-        let mut entries = self.entries.write().unwrap_or_else(|error| error.into_inner());
+        let mut entries = self
+            .entries
+            .write()
+            .unwrap_or_else(|error| error.into_inner());
         let is_new = !entries.contains_key(&entry.provider);
         entries.insert(entry.provider.clone(), entry);
         is_new
@@ -48,13 +51,19 @@ impl ProviderAuthErrorRegistry {
 
     /// Removes a provider's episode and returns whether one existed.
     pub fn clear(&self, provider: &str) -> bool {
-        self.entries.write().unwrap_or_else(|error| error.into_inner())
-            .remove(provider).is_some()
+        self.entries
+            .write()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(provider)
+            .is_some()
     }
 
     /// Returns a snapshot sorted by provider slug.
     pub fn snapshot(&self) -> Vec<ProviderAuthError> {
-        let entries = self.entries.read().unwrap_or_else(|error| error.into_inner());
+        let entries = self
+            .entries
+            .read()
+            .unwrap_or_else(|error| error.into_inner());
         let mut snapshot: Vec<_> = entries.values().cloned().collect();
         snapshot.sort_by(|left, right| left.provider.cmp(&right.provider));
         snapshot
@@ -63,7 +72,10 @@ impl ProviderAuthErrorRegistry {
     /// Clears all episodes. Hosts use this when replacing runtime identity
     /// or resetting an explicitly scoped registry.
     pub fn clear_all(&self) {
-        self.entries.write().unwrap_or_else(|error| error.into_inner()).clear();
+        self.entries
+            .write()
+            .unwrap_or_else(|error| error.into_inner())
+            .clear();
     }
 }
 
