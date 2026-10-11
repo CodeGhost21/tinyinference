@@ -10,9 +10,7 @@ use crate::model::ChatModel;
 use crate::model::discover::{DiscoveryRequest, pinned_openrouter_providers};
 use crate::{Error, Result};
 
-use super::anthropic::{
-    AnthropicConfig, build_anthropic_model_with_http, endpoint_is_anthropic_messages,
-};
+use super::anthropic::{AnthropicConfig, endpoint_is_anthropic_messages};
 use super::openai::codex::OpenAiCodexRouting;
 use super::openai::{AuthStyle, OpenAiConfig, endpoint_is_openrouter};
 use super::{ProviderKind, ProviderSpec};
@@ -145,17 +143,21 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
             && options.native_tool_calling != Some(false)
             && endpoint_is_anthropic_messages(endpoint)
         {
-            return Ok(build_anthropic_model_with_http(
-                AnthropicConfig {
-                    endpoint,
-                    api_key: &key,
-                    model: &spec.model,
-                    temperature_override: options.temperature_override,
-                    temperature_unsupported_models: options.temperature_unsupported_models,
-                    extra_headers: options.extra_headers,
-                },
-                options.http.clone(),
-            ));
+            return Ok(
+                super::anthropic::config::build_anthropic_model_with_overrides(
+                    AnthropicConfig {
+                        endpoint,
+                        api_key: &key,
+                        model: &spec.model,
+                        temperature_override: options.temperature_override,
+                        temperature_unsupported_models: options.temperature_unsupported_models,
+                        extra_headers: options.extra_headers,
+                    },
+                    options.http.clone(),
+                    &spec.provider,
+                    options.vision,
+                ),
+            );
         }
         let local = is_local(&spec.kind);
         let oauth = options.codex.is_some_and(|routing| routing.using_oauth);
@@ -245,7 +247,7 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
                 spec.provider
             )));
         }
-        Ok(key)
+        Ok(key.trim().to_string())
     }
 }
 

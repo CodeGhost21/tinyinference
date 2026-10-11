@@ -66,10 +66,23 @@ pub fn build_anthropic_model_with_http(
     config: AnthropicConfig<'_>,
     http: Option<reqwest::Client>,
 ) -> Arc<dyn ChatModel<()>> {
+    build_anthropic_model_with_overrides(config, http, super::PROVIDER, None)
+}
+
+pub(crate) fn build_anthropic_model_with_overrides(
+    config: AnthropicConfig<'_>,
+    http: Option<reqwest::Client>,
+    provider_name: &str,
+    vision: Option<bool>,
+) -> Arc<dyn ChatModel<()>> {
     let mut model = AnthropicModel::with_base_url(config.api_key, config.endpoint)
+        .with_provider_name(provider_name)
         .with_model(config.model)
         .with_temperature_override(config.temperature_override)
         .with_temperature_unsupported_models(config.temperature_unsupported_models.iter().cloned());
+    if let Some(vision) = vision {
+        model = model.with_vision(vision);
+    }
     if let Some(http) = http {
         model = model.with_client(http);
     }

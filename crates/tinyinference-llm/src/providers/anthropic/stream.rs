@@ -465,6 +465,7 @@ struct SseState {
     pending: VecDeque<ModelStreamItem>,
     acc: AnthropicStreamAcc,
     model: String,
+    provider: String,
     started: bool,
     finished: bool,
     completion_seen: bool,
@@ -493,7 +494,7 @@ impl SseState {
                 }
             }
         };
-        provider_error.provider = PROVIDER.to_string();
+        provider_error.provider = self.provider.clone();
         provider_error.model = Some(self.model.clone());
         provider_error.stop_reason = self.acc.stop_reason.clone();
         let partial = std::mem::take(&mut self.acc).into_response().message;
@@ -568,7 +569,7 @@ async fn sse_next(mut state: SseState) -> Option<(ModelStreamItem, SseState)> {
             state.terminal_emitted = true;
             let mut response = std::mem::take(&mut state.acc).into_response();
             response.message.origin = Some(crate::message::MessageOrigin {
-                provider: PROVIDER.to_string(),
+                provider: state.provider.clone(),
                 api: super::MESSAGES_API.to_string(),
                 model: state.model.clone(),
             });
@@ -604,7 +605,11 @@ async fn sse_next(mut state: SseState) -> Option<(ModelStreamItem, SseState)> {
 }
 
 /// Wraps a successful streaming HTTP response as a [`ModelStream`].
-pub(super) fn into_model_stream(response: reqwest::Response, model: String) -> ModelStream {
+pub(super) fn into_model_stream(
+    response: reqwest::Response,
+    model: String,
+    provider: String,
+) -> ModelStream {
     let bytes = response
         .bytes_stream()
         .map(|chunk| chunk.map_err(|error| Error::Model(format!("stream chunk failed: {error}"))));
@@ -614,6 +619,7 @@ pub(super) fn into_model_stream(response: reqwest::Response, model: String) -> M
         pending: VecDeque::new(),
         acc: AnthropicStreamAcc::default(),
         model,
+        provider,
         started: false,
         finished: false,
         completion_seen: false,
@@ -626,6 +632,15 @@ pub(super) fn into_model_stream(response: reqwest::Response, model: String) -> M
 /// path uses.
 #[cfg(test)]
 pub(super) fn stream_from_bytes(chunks: Vec<Vec<u8>>, model: &str) -> ModelStream {
+    stream_from_bytes_with_provider(chunks, model, PROVIDER)
+}
+
+#[cfg(test)]
+pub(super) fn stream_from_bytes_with_provider(
+    chunks: Vec<Vec<u8>>,
+    model: &str,
+    provider: &str,
+) -> ModelStream {
     let bytes = futures::stream::iter(
         chunks
             .into_iter()
@@ -637,6 +652,7 @@ pub(super) fn stream_from_bytes(chunks: Vec<Vec<u8>>, model: &str) -> ModelStrea
         pending: VecDeque::new(),
         acc: AnthropicStreamAcc::default(),
         model: model.to_string(),
+        provider: provider.to_string(),
         started: false,
         finished: false,
         completion_seen: false,
