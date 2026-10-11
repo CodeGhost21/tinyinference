@@ -51,6 +51,12 @@ Never log or expose API keys; custom `Debug` implementations must redact them.
 Every public item needs rustdoc. Document `# Errors` and `# Panics` where
 applicable. Keep Markdown files at 500 lines or fewer.
 
+Generic provider failure facts and authentication failure episode state belong
+to these library APIs. Hosts own state lifetime, timestamps, presentation text,
+managed-provider exclusions, classifier precedence, notifications and telemetry
+delivery. A library registry of authentication episodes does not load or select
+a host's saved provider configuration.
+
 ## Tests
 
 Keep unit tests beside their module in sibling `*_tests.rs` files, never an inline `mod tests` block. Tests must not depend on network access, wall-clock
