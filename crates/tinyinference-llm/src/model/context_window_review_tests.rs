@@ -442,3 +442,73 @@ async fn identity_free_lookup_projects_smallest_observed_limits_without_changing
     resolver.clear();
     assert_eq!(resolver.remembered_window("route", "model"), None);
 }
+
+#[tokio::test]
+async fn resolver_debug_omits_discovery_credentials_and_urls() {
+    let resolver = ContextWindowResolver::new();
+    let request = DiscoveryRequest::new("https://user:password@example.test/v1", "model")
+        .with_listing_url("https://listing.test/models?api_key=synthetic-secret")
+        .with_single_model_probe(false)
+        .with_ollama_native(false);
+    resolver.resolve("route", "model", ContextWindowInput {
+        discovery: Some(&request), ..Default::default()
+    }, &listing(Some(serde_json::json!({"data":[{"id":"model","context_length":128000}]}))), &ModelLimitsCache::default()).await;
+    let debug = format!("{resolver:?}");
+    for secret in ["password", "synthetic-secret", "example.test", "listing.test"] {
+        assert!(!debug.contains(secret), "resolver debug disclosed discovery identity");
+    }
+}
+
+struct HeldProbe {
+    started: Notify,
+    release: Notify,
+}
+#[async_trait::async_trait]
+impl ModelListingFetcher for HeldProbe {
+    async fn get_json(&self, url: &str, _: &[(String, String)]) -> Result<serde_json::Value> {
+        if url.ends_with("/models/model") {
+            self.started.notify_one();
+            self.release.notified().await;
+            Ok(serde_json::json!({"id":"model","context_length":128000,"max_output_tokens":4096}))
+        } else {
+            Ok(serde_json::json!({"data":[
+                {"id":"model","max_output_tokens":4096},
+                {"id":"sibling","context_length":96000,"max_output_tokens":4096}
+            ]}))
+        }
+    }
+}
+
+#[tokio::test]
+async fn clear_during_target_probe_does_not_publish_sibling_limits() {
+    let resolver = Arc::new(ContextWindowResolver::new());
+    let cache = Arc::new(ModelLimitsCache::default());
+    let fetcher = Arc::new(HeldProbe { started: Notify::new(), release: Notify::new() });
+    let request = request().with_single_model_probe(true);
+    let task = {
+        let resolver = resolver.clone();
+        let cache = cache.clone();
+        let fetcher = fetcher.clone();
+        let request = request.clone();
+        tokio::spawn(async move {
+            resolver.resolve("route", "model", ContextWindowInput {
+                discovery: Some(&request), ..Default::default()
+            }, fetcher.as_ref(), cache.as_ref()).await
+        })
+    };
+    fetcher.started.notified().await;
+    let premature = cache.get_variant(&request.endpoint, "sibling", &request.cache_variant()).discovered.is_some();
+    resolver.clear();
+    fetcher.release.notify_one();
+    task.await.unwrap();
+    assert!(!premature, "sibling limits must wait for the final discovery commit");
+    assert!(cache.get_variant(&request.endpoint, "sibling", &request.cache_variant()).discovered.is_none());
+    let mut sibling = request;
+    sibling.model = "sibling".into();
+    let fresh = listing(Some(serde_json::json!({"data":[{"id":"sibling","context_length":64000,"max_output_tokens":2048}]})));
+    let resolved = resolver.resolve("route", "sibling", ContextWindowInput {
+        discovery: Some(&sibling), ..Default::default()
+    }, &fresh, cache.as_ref()).await;
+    assert_eq!(resolved.window, Some(64000));
+    assert_eq!(fresh.calls.load(Ordering::SeqCst), 1);
+}
