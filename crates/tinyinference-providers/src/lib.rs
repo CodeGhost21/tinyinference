@@ -2,6 +2,7 @@
 
 pub mod auth;
 pub mod billing;
+pub mod builtin;
 pub mod config_rejection;
 pub mod oauth;
 
