@@ -464,6 +464,7 @@ pub fn parse_retry_after_ms(message: &str) -> Option<u64> {
     None
 }
 
+pub mod http;
 mod context_limit;
 mod text;
 
