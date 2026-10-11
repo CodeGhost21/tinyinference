@@ -266,10 +266,10 @@ impl ResolverState {
             .iter()
             .filter_map(|(key, limits)| (key.route == *route).then_some(limits))
         {
-            if let Some(window) = limits.window {
-                if result.window.is_none_or(|current| window.0 < current.0) {
-                    result.window = Some(window);
-                }
+            if let Some(window) = limits.window
+                && result.window.is_none_or(|current| window.0 < current.0)
+            {
+                result.window = Some(window);
             }
             if let Some(cap) = limits.max_output_tokens {
                 result.max_output_tokens =
