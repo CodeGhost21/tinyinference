@@ -76,11 +76,11 @@ async fn registry_routes_send_the_configured_wire_request() {
             })
         });
         let supplied_options = match variant {
-            "local_override" => serde_json::json!({"options":{"num_ctx":4096},"seed":7}),
+            "local_override" => serde_json::json!({"options":{"num_ctx":4096},"top_k":7}),
             "openrouter_override" => {
-                serde_json::json!({"provider":{"sort":"latency","only":["DeepInfra"]},"seed":7})
+                serde_json::json!({"provider":{"sort":"latency","only":["DeepInfra"]},"top_k":7})
             }
-            _ => serde_json::json!({"seed":7}),
+            _ => serde_json::json!({"top_k":7}),
         };
         let model = registry
             .build_with(
@@ -149,7 +149,7 @@ async fn registry_routes_send_the_configured_wire_request() {
                     assert_eq!(body["provider"]["only"], serde_json::json!(["DeepInfra"]));
                 }
             }
-            assert_eq!(body["seed"], 7);
+            assert_eq!(body["top_k"], 7);
             assert_eq!(body["max_tokens"], 123);
         }
     }
