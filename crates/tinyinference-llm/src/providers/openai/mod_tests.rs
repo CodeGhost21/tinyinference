@@ -3355,13 +3355,13 @@ fn deepseek_tool_history(thinking: bool) -> Vec<Message> {
 }
 
 #[test]
-fn deepseek_keeps_unreasoned_tool_continuations_out_of_thinking_mode() {
+fn deepseek_preserves_requested_thinking_for_unreasoned_tool_continuations() {
     let model = model();
     let request = ModelRequest::new(deepseek_tool_history(false))
         .with_model("deepseek/deepseek-v4.1-flash")
         .with_reasoning_effort(ReasoningEffort::High);
     let value = serde_json::to_value(model.translate_request(&request).unwrap()).unwrap();
-    assert_eq!(value["reasoning_effort"], "none");
+    assert_eq!(value["reasoning_effort"], "high");
     assert_eq!(value["messages"][1]["tool_calls"][0]["id"], "call-1");
 }
 
