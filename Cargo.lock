@@ -1331,6 +1331,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tinyinference-core",
+ "tinyinference-providers",
  "tinytools-agent",
  "tokio",
  "tracing",

@@ -1,6 +1,7 @@
 //! Provider routing, authentication protocols, and error classification.
 
 pub mod auth;
+pub mod auth_registry;
 pub mod billing;
 pub mod builtin;
 pub mod config_rejection;
