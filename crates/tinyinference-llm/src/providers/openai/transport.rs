@@ -1301,7 +1301,7 @@ impl OpenAiModel {
             })
             .collect::<Result<Vec<_>>>()?;
         if self.wants_cache_breakpoints_for(request) {
-            apply_cache_breakpoints(&mut messages);
+            apply_cache_breakpoints(&mut messages, is_anthropic_model(effective_model));
         }
 
         let mut tools: Vec<ToolWire> = if prompt_guided_tools {

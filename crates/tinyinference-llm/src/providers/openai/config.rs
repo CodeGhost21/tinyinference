@@ -94,11 +94,8 @@ pub fn endpoint_is_openrouter(endpoint: &str) -> bool {
     reqwest::Url::parse(endpoint.trim())
         .ok()
         .and_then(|url| {
-            url.host_str().map(|host| {
-                host.eq_ignore_ascii_case("openrouter.ai")
-                    || (std::env::var_os("SCRATCH_LOOPBACK_IS_OPENROUTER").is_some()
-                        && (host == "127.0.0.1" || host == "localhost"))
-            })
+            url.host_str()
+                .map(|host| host.eq_ignore_ascii_case("openrouter.ai"))
         })
         .unwrap_or(false)
 }
