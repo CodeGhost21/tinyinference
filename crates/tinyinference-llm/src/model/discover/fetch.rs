@@ -223,7 +223,13 @@ pub(crate) async fn discover_model_limits_with_guard(
         elapsed_ms = started.elapsed().as_millis() as u64,
         "[model_limits] discovery finished"
     );
-    let mut resolved = limits.clone();
+    // Even if a newer generation rejects publication, the pending caller
+    // must respect the overflow window observed when its discovery began.
+    let mut resolved = super::cache::CachedLimits {
+        discovered: Some(limits.clone()),
+        learned_context_window: cached.learned_context_window,
+    }
+    .effective();
     access(&mut || {
         // Publish completed listing facts after probes finish or time out and the
         // caller's generation is still current. No stale sibling survives clear.
