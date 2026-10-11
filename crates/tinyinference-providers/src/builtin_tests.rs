@@ -215,7 +215,7 @@ fn openai_host_and_unknown_proxies_keep_the_responses_fallback() {
 #[test]
 fn host_gate_agrees_with_slug_capability_for_every_builtin() {
     for provider in BUILTIN_CLOUD_PROVIDERS {
-        // OpenhumanJwt / Anthropic presets never route through the
+        // Anthropic presets never route through the
         // OpenAI-compatible Responses fallback; the gate only matters for
         // the Bearer OpenAI-compatible hosts.
         if provider.auth_style != BuiltinAuthStyle::Bearer {
@@ -229,4 +229,10 @@ fn host_gate_agrees_with_slug_capability_for_every_builtin() {
             provider.slug
         );
     }
+}
+
+#[test]
+fn host_managed_provider_is_an_extension_not_a_generic_builtin() {
+    assert!(builtin_cloud_provider("openhuman").is_none());
+    assert!(!host_is_builtin_cloud_provider("api.openhuman.ai"));
 }
