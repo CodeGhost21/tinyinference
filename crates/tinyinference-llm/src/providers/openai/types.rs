@@ -288,6 +288,10 @@ pub struct ChatMessageWire {
     /// For `tool` messages, the id of the call this message answers.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
+    /// DeepSeek's assistant reasoning, replayed separately from visible content.
+    /// Omitted for providers that do not accept this field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
 }
 
 /// A function-tool declaration in the request `tools` array.

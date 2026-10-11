@@ -1281,6 +1281,10 @@ impl OpenAiModel {
             base_messages
         };
         let effective_model = request.model.as_deref().unwrap_or(&self.model);
+        let deepseek = effective_model
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| name.to_ascii_lowercase().starts_with("deepseek-"));
         let hoists_system = derive_profile(&self.provider, effective_model).hoists_system_messages;
         let mut messages = source_messages
             .iter()
@@ -1288,7 +1292,13 @@ impl OpenAiModel {
             // to the provider.
             .filter(|message| !matches!(message, Message::Custom(_)))
             .filter(|message| !(hoists_system && is_record_only_system(message)))
-            .map(translate_message)
+            .map(|message| {
+                if deepseek {
+                    translate_deepseek_message(message)
+                } else {
+                    translate_message(message)
+                }
+            })
             .collect::<Result<Vec<_>>>()?;
         if self.wants_cache_breakpoints_for(request) {
             apply_cache_breakpoints(&mut messages);
@@ -1371,7 +1381,7 @@ impl OpenAiModel {
             merge_provider_options(&self.default_provider_options, &request.provider_options);
         let mut extra = provider_extra_options(&merged_provider_options)?;
         let openrouter_budget = openrouter_reasoning_budget(&self.base_url, request, &extra);
-        let reasoning_effort = if openrouter_budget.is_some()
+        let mut reasoning_effort = if openrouter_budget.is_some()
             || merged_provider_options
                 .get("reasoning_effort")
                 .is_some_and(|value| !value.is_null())
@@ -1390,6 +1400,17 @@ impl OpenAiModel {
                 "[openai] openrouter reasoning budget sent as reasoning.max_tokens"
             );
             extra.insert("reasoning".to_string(), json!({ "max_tokens": budget }));
+        }
+
+        if deepseek && deepseek_unreasoned_tool_chain(source_messages) {
+            // The recovery may have spent its hold-off and requested thinking
+            // again, but the provider rejects a mixed-mode tool chain. Do not
+            // invent reasoning for the earlier unreasoned assistant message.
+            // Remove competing provider options so this wire constraint wins.
+            extra.remove("reasoning");
+            extra.remove("reasoning_effort");
+            extra.remove("thinking");
+            reasoning_effort = Some(crate::model::ReasoningEffort::None);
         }
 
         Ok(ChatCompletionRequest {
