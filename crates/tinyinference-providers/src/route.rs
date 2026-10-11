@@ -38,12 +38,11 @@ pub fn split_model_and_temperature(raw: &str) -> (String, Option<f64>) {
     if let Some(at_pos) = trimmed.rfind('@') {
         let head = trimmed[..at_pos].trim();
         let tail = trimmed[at_pos + 1..].trim();
-        if !head.is_empty() {
-            if let Ok(parsed) = tail.parse::<f64>() {
-                if parsed.is_finite() {
-                    return (head.to_string(), Some(parsed));
-                }
-            }
+        if !head.is_empty()
+            && let Ok(parsed) = tail.parse::<f64>()
+            && parsed.is_finite()
+        {
+            return (head.to_string(), Some(parsed));
         }
     }
     (trimmed.to_string(), None)
