@@ -28,6 +28,7 @@ pub use cache::{
     CachedLimits, DEFAULT_DISCOVERED_TTL, DEFAULT_LEARNED_TTL, DEFAULT_NEGATIVE_TTL,
     ModelLimitsCache, model_limits_cache,
 };
+pub(crate) use fetch::discover_model_limits_with_guard;
 pub use fetch::{
     ModelListingFetcher, ReqwestListingFetcher, discover_model_limits, discover_model_limits_with,
 };

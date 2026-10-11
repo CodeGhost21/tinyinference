@@ -166,8 +166,26 @@ pub async fn discover_model_limits_with(
     cache: &ModelLimitsCache,
     request: &DiscoveryRequest,
 ) -> Option<ModelLimits> {
+    discover_model_limits_with_guard(fetcher, cache, request, &|operation| {
+        operation();
+        true
+    })
+    .await
+}
+
+// Synchronous access keeps a host identity guard held across each cache
+// operation, including the listing's sibling-model writes.
+type CacheAccess<'a> = dyn Fn(&mut dyn FnMut()) -> bool + Sync + 'a;
+
+pub(crate) async fn discover_model_limits_with_guard(
+    fetcher: &dyn ModelListingFetcher,
+    cache: &ModelLimitsCache,
+    request: &DiscoveryRequest,
+    access: &CacheAccess<'_>,
+) -> Option<ModelLimits> {
     let variant = request.cache_variant();
-    let cached = cache.get_variant(&request.endpoint, &request.model, &variant);
+    let mut cached = super::cache::CachedLimits::default();
+    access(&mut || cached = cache.get_variant(&request.endpoint, &request.model, &variant));
     if cached.discovered.is_some() {
         tracing::debug!(
             endpoint = %request.endpoint,
@@ -178,19 +196,24 @@ pub async fn discover_model_limits_with(
         return cached.effective();
     }
     let started = std::time::Instant::now();
-    let limits =
-        match tokio::time::timeout(request.timeout, fetch_limits(fetcher, cache, request)).await {
-            Ok(limits) => limits,
-            Err(_) => {
-                tracing::warn!(
-                    endpoint = %request.endpoint,
-                    model = %request.model,
-                    timeout_ms = request.timeout.as_millis() as u64,
-                    "[model_limits] discovery timed out"
-                );
-                None
-            }
-        };
+    let mut siblings = Vec::new();
+    let limits = match tokio::time::timeout(
+        request.timeout,
+        fetch_limits(fetcher, request, &mut siblings),
+    )
+    .await
+    {
+        Ok(limits) => limits,
+        Err(_) => {
+            tracing::warn!(
+                endpoint = %request.endpoint,
+                model = %request.model,
+                timeout_ms = request.timeout.as_millis() as u64,
+                "[model_limits] discovery timed out"
+            );
+            None
+        }
+    };
     tracing::info!(
         endpoint = %request.endpoint,
         model = %request.model,
@@ -200,10 +223,30 @@ pub async fn discover_model_limits_with(
         elapsed_ms = started.elapsed().as_millis() as u64,
         "[model_limits] discovery finished"
     );
-    cache.insert_discovered_variant(&request.endpoint, &request.model, &variant, limits);
-    cache
-        .get_variant(&request.endpoint, &request.model, &variant)
-        .effective()
+    // Even if a newer generation rejects publication, the pending caller
+    // must respect the overflow window observed when its discovery began.
+    let mut resolved = super::cache::CachedLimits {
+        discovered: Some(limits.clone()),
+        learned_context_window: cached.learned_context_window,
+    }
+    .effective();
+    access(&mut || {
+        // Publish completed listing facts after probes finish or time out and the
+        // caller's generation is still current. No stale sibling survives clear.
+        for (id, limits) in &siblings {
+            cache.insert_discovered_variant(&request.endpoint, id, &variant, Some(limits.clone()));
+        }
+        cache.insert_discovered_variant(
+            &request.endpoint,
+            &request.model,
+            &variant,
+            limits.clone(),
+        );
+        resolved = cache
+            .get_variant(&request.endpoint, &request.model, &variant)
+            .effective();
+    });
+    resolved
 }
 
 /// [`discover_model_limits_with`] through the process-wide cache.
@@ -216,8 +259,8 @@ pub async fn discover_model_limits(
 
 async fn fetch_limits(
     fetcher: &dyn ModelListingFetcher,
-    cache: &ModelLimitsCache,
     request: &DiscoveryRequest,
+    siblings: &mut Vec<(String, ModelLimits)>,
 ) -> Option<ModelLimits> {
     let listing_url = request.effective_listing_url();
     let mut found = match fetcher.get_json(&listing_url, &request.headers).await {
@@ -231,7 +274,6 @@ async fn fetch_limits(
             // Listing-level limits are the broad (unpinned) answer; never
             // prime them for a pinned request, which needs endpoint limits.
             if request.pinned_providers.is_empty() {
-                let variant = request.cache_variant();
                 for (id, limits) in listed {
                     // A partial entry (no window) must not become a finished
                     // discovery for its model when the native probe could still
@@ -240,12 +282,7 @@ async fn fetch_limits(
                         continue;
                     }
                     if !model_ids_match(&id, &request.model) {
-                        cache.insert_discovered_variant(
-                            &request.endpoint,
-                            &id,
-                            &variant,
-                            Some(limits),
-                        );
+                        siblings.push((id, limits));
                     }
                 }
             }
