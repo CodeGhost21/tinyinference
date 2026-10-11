@@ -634,3 +634,172 @@ async fn redirect_is_not_followed() {
     ));
     assert_eq!(requests.lock().await.len(), 1);
 }
+
+#[tokio::test]
+async fn self_hosted_posts_to_the_declared_endpoint_and_requires_the_model_echo() {
+    let endpoint = "https://decisions.internal.example/v1/decide";
+    let mut config = ClientConfig::self_hosted(endpoint, "secret-test-key");
+    config.retry.max_retries = 0;
+    let mut self_hosted_request = request();
+    self_hosted_request.model = "surogate-decisions-v1".into();
+    let (client, requests) = mock_client(
+        config.clone(),
+        vec![response(
+            200,
+            &success().replace("jev-latest", "surogate-decisions-v1"),
+            "",
+        )],
+    );
+
+    let result = client.evaluate(&self_hosted_request).await.unwrap();
+
+    assert_eq!(result.response.model, "surogate-decisions-v1");
+    let requests = requests.lock().await;
+    assert_eq!(requests[0].url, endpoint);
+    assert_eq!(
+        requests[0].headers.get("authorization").unwrap(),
+        "Bearer secret-test-key"
+    );
+    assert!(requests[0].headers.get("x-sdk-name").is_none());
+    assert!(
+        requests[0]
+            .body
+            .contains("\"model\":\"surogate-decisions-v1\"")
+    );
+    drop(requests);
+
+    let (client, _) = mock_client(config, vec![response(200, &success(), "")]);
+    let failure = evaluation_failure(client.evaluate(&self_hosted_request).await);
+    assert!(matches!(*failure.error, Error::InvalidResponse { .. }));
+}
+
+#[tokio::test]
+async fn self_hosted_without_a_key_sends_no_authorization_header() {
+    let mut config = ClientConfig::self_hosted("http://127.0.0.1:8080/v1/systemone", "");
+    config.retry.max_retries = 0;
+    let (client, requests) = mock_client(config, vec![response(200, &success(), "")]);
+
+    client.evaluate(&request()).await.unwrap();
+
+    assert!(
+        requests.lock().await[0]
+            .headers
+            .get("authorization")
+            .is_none()
+    );
+}
+
+#[test]
+fn self_hosted_configuration_is_validated() {
+    assert_eq!(
+        ClientConfig::self_hosted("https://example.com/decide", "").provider,
+        Provider::SelfHosted
+    );
+    for endpoint in [
+        "not a URL",
+        "http://decisions.example/v1/systemone",
+        "https://user:pass@example.com/decide",
+        "https://example.com/decide?key=1",
+    ] {
+        assert!(
+            matches!(
+                Client::new(ClientConfig::self_hosted(endpoint, "key")),
+                Err(Error::InvalidConfig { .. })
+            ),
+            "{endpoint} should be rejected"
+        );
+    }
+    let mut missing_endpoint = ClientConfig::new("key");
+    missing_endpoint.provider = Provider::SelfHosted;
+    assert!(matches!(
+        Client::new(missing_endpoint),
+        Err(Error::InvalidConfig { reason }) if reason.contains("endpoint URL")
+    ));
+    assert!(matches!(
+        Client::new(ClientConfig::new(" ")),
+        Err(Error::InvalidConfig { .. })
+    ));
+    let rendered = format!(
+        "{:?}",
+        ClientConfig::self_hosted("https://example.com/private/path", "secret-test-key")
+    );
+    assert!(!rendered.contains("secret-test-key"));
+    assert!(!rendered.contains("private/path"));
+}
+
+#[tokio::test]
+async fn self_hosted_preserves_all_decision_types_and_rejects_invalid_answers() {
+    use crate::{Noul, Score};
+
+    let mut request = request();
+    request.model = "openjev-local".into();
+    request.questions.insert(
+        "condition".into(),
+        Question::Noul(Noul {
+            instructions: json!("Is it supported?"),
+            criteria: None,
+        }),
+    );
+    request.questions.insert(
+        "quality".into(),
+        Question::Score(Score {
+            instructions: json!("How strong is the evidence?"),
+            criteria: vec![json!("weak"), json!("strong")],
+        }),
+    );
+    let mut payload: serde_json::Value = serde_json::from_str(&success()).unwrap();
+    payload["model"] = json!("openjev-local");
+    payload["answers"]["condition"] = json!({"type": "noul", "noul": 0.9});
+    payload["answers"]["quality"] = json!({
+        "type": "score", "score": 0.75,
+        "legend": {"0": "weak", "1": "strong"},
+        "probabilities": {"0": 0.25, "1": 0.75}, "confidence": 0.2
+    });
+    let config = ClientConfig::self_hosted("http://[::1]:8000/v1/decisions", " \t");
+    let (client, requests) = mock_client(
+        config.clone(),
+        vec![response(200, &payload.to_string(), "")],
+    );
+    let result = client.evaluate(&request).await.unwrap();
+    assert_eq!(serde_json::to_value(result.response).unwrap(), payload);
+    let requests = requests.lock().await;
+    assert_eq!(
+        serde_json::from_str::<EvaluationRequest>(&requests[0].body).unwrap(),
+        request
+    );
+    assert!(requests[0].headers.get("authorization").is_none());
+    drop(requests);
+
+    let mut invalid_payloads = Vec::new();
+    let mut invalid = payload.clone();
+    invalid["answers"]
+        .as_object_mut()
+        .unwrap()
+        .remove("condition");
+    invalid_payloads.push(invalid);
+    let mut invalid = payload.clone();
+    invalid["answers"]["condition"] = json!({"type": "noul", "noul": 1.1});
+    invalid_payloads.push(invalid);
+    let mut invalid = payload.clone();
+    invalid["answers"]["quality"]["score"] = json!(0.1);
+    invalid_payloads.push(invalid);
+    let mut invalid = payload;
+    invalid["answers"]["route"]["probabilities"] = json!({"alice": 0.2, "unknown": 0.8});
+    invalid_payloads.push(invalid);
+    for invalid in invalid_payloads {
+        let (client, _) = mock_client(
+            config.clone(),
+            vec![response(200, &invalid.to_string(), "")],
+        );
+        let failure = evaluation_failure(client.evaluate(&request).await);
+        assert!(matches!(*failure.error, Error::InvalidResponse { .. }));
+        assert_eq!(failure.attempts, 1);
+    }
+
+    request.model.clear();
+    let (client, requests) = mock_client(config, vec![]);
+    let failure = evaluation_failure(client.evaluate(&request).await);
+    assert!(matches!(*failure.error, Error::InvalidRequest { .. }));
+    assert_eq!(failure.attempts, 0);
+    assert!(requests.lock().await.is_empty());
+}

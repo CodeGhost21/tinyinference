@@ -77,6 +77,31 @@ fn openjev_constructor_uses_openjev_default_model() {
 }
 
 #[test]
+fn explicit_model_constructor_preserves_local_model_and_question_types() {
+    let request = EvaluationRequest::new(
+        "ci-models-gemma__ci-rune-26b-a4b",
+        json!({"ticket": "charged twice"}),
+        questions(),
+    );
+    request.validate().unwrap();
+    let wire = serde_json::to_value(&request).unwrap();
+    assert_eq!(wire["model"], "ci-models-gemma__ci-rune-26b-a4b");
+    assert_eq!(wire["state"], json!({"ticket": "charged twice"}));
+    assert_eq!(wire["questions"]["route"]["type"], "choice");
+    assert_eq!(wire["questions"]["quality"]["type"], "score");
+    assert_eq!(wire["questions"]["unsafe"]["type"], "noul");
+    assert_eq!(
+        serde_json::from_value::<EvaluationRequest>(wire).unwrap(),
+        request
+    );
+    assert!(
+        EvaluationRequest::new(" ", "state", questions())
+            .validate()
+            .is_err()
+    );
+}
+
+#[test]
 fn public_request_types_round_trip_with_and_without_noul_criteria() {
     let request = EvaluationRequest::jev(json!({"message": "review this"}), questions());
     let value = serde_json::to_value(&request).unwrap();

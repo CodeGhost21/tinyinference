@@ -17,24 +17,35 @@ pub struct EvaluationRequest {
 }
 
 impl EvaluationRequest {
+    /// Build a request for an explicit model id, including a locally served
+    /// OpenJEV, Decider, or other Jev-compatible decision model.
+    ///
+    /// The id is passed through unchanged and must match the response's model
+    /// id for a self-hosted client. [`Self::validate`] checks the request before
+    /// the client sends it.
+    #[must_use]
+    pub fn new(
+        model: impl Into<String>,
+        state: impl Into<Value>,
+        questions: BTreeMap<String, Question>,
+    ) -> Self {
+        Self {
+            state: state.into(),
+            model: model.into(),
+            questions,
+        }
+    }
+
     /// Build a request using the stable Jev alias.
     #[must_use]
     pub fn jev(state: impl Into<Value>, questions: BTreeMap<String, Question>) -> Self {
-        Self {
-            state: state.into(),
-            model: "jev-latest".to_owned(),
-            questions,
-        }
+        Self::new("jev-latest", state, questions)
     }
 
     /// Build a request using OpenJEV's default model identifier, `openjev`.
     #[must_use]
     pub fn openjev(state: impl Into<Value>, questions: BTreeMap<String, Question>) -> Self {
-        Self {
-            state: state.into(),
-            model: "openjev".to_owned(),
-            questions,
-        }
+        Self::new("openjev", state, questions)
     }
 }
 
