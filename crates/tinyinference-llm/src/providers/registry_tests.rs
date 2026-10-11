@@ -304,3 +304,46 @@ fn debugging_registry_options_never_discloses_transport_secrets() {
     assert!(!debug.contains("secret"));
     assert!(debug.contains("Authorization"));
 }
+
+#[test]
+fn resolved_credentials_are_trimmed_for_both_inference_and_discovery() {
+    let registry = ProviderRegistry::new(|_: &ProviderSpec| Ok("\n test-key \r\n".into()));
+    let spec = ProviderSpec::for_kind(ProviderKind::OpenAi);
+    assert_eq!(registry.resolve_key(&spec).unwrap(), "test-key");
+    let request = registry
+        .discovery_request(&spec, &Default::default())
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        request.headers,
+        vec![("Authorization".into(), "Bearer test-key".into())]
+    );
+}
+
+#[test]
+fn native_anthropic_preserves_the_resolved_provider_identity() {
+    let spec = ProviderSpec {
+        provider: "my-anthropic".into(),
+        ..ProviderSpec::for_kind(ProviderKind::Anthropic)
+    };
+    let model = registry().build(&spec).unwrap();
+    assert_eq!(
+        model.profile().unwrap().provider.as_deref(),
+        Some("my-anthropic")
+    );
+}
+
+#[test]
+fn native_anthropic_applies_the_vision_override() {
+    let spec = ProviderSpec::for_kind(ProviderKind::Anthropic);
+    let model = registry()
+        .build_with(
+            &spec,
+            ProviderBuildOptions {
+                vision: Some(false),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert!(!model.profile().unwrap().modalities.image_in);
+}
