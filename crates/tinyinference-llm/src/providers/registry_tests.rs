@@ -101,6 +101,13 @@ fn local_and_oauth_discovery_do_not_read_credentials() {
             .unwrap()
             .is_none()
     );
+    let spec = ProviderSpec::for_kind(ProviderKind::LmStudio);
+    assert!(
+        registry
+            .discovery_request(&spec, &Default::default())
+            .unwrap()
+            .is_none()
+    );
     let spec = ProviderSpec::for_kind(ProviderKind::OpenAi);
     let route = OpenAiCodexRouting {
         endpoint: "https://chatgpt.com/backend-api/codex".into(),
@@ -119,6 +126,47 @@ fn local_and_oauth_discovery_do_not_read_credentials() {
             .unwrap()
             .is_none()
     );
+}
+
+#[test]
+fn discovery_extra_headers_replace_builtin_authentication_case_insensitively() {
+    let spec = ProviderSpec::for_kind(ProviderKind::Anthropic);
+    let headers = vec![
+        ("X-API-KEY".into(), "override-key".into()),
+        ("Anthropic-Version".into(), "override-version".into()),
+    ];
+    let request = registry()
+        .discovery_request(
+            &spec,
+            &ProviderBuildOptions {
+                extra_headers: &headers,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        request.headers,
+        vec![
+            ("X-API-KEY".into(), "override-key".into()),
+            ("Anthropic-Version".into(), "override-version".into()),
+        ]
+    );
+}
+
+#[test]
+fn build_and_discovery_trim_model_and_endpoint_values() {
+    let mut spec = ProviderSpec::for_kind(ProviderKind::OpenAi);
+    spec.model = " gpt-test\n".into();
+    spec.base_url = " https://api.openai.com/v1 \n".into();
+    let model = registry().build(&spec).unwrap();
+    assert_eq!(model.profile().unwrap().model.as_deref(), Some("gpt-test"));
+    let request = registry()
+        .discovery_request(&spec, &Default::default())
+        .unwrap()
+        .unwrap();
+    assert_eq!(request.model, "gpt-test");
+    assert_eq!(request.endpoint, "https://api.openai.com/v1");
 }
 
 #[test]
