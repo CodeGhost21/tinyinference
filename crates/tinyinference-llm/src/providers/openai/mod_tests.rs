@@ -2622,6 +2622,81 @@ mod explicit_cache_control {
         assert_eq!(marker_count(&model, &request), 2);
     }
 
+    /// A tool loop: the last user turn is followed by assistant tool calls and
+    /// tool results, so the newest content is never a user message.
+    fn tool_loop_request() -> ModelRequest {
+        let call = |id: &str| crate::tool::ToolCall::new(id, "lookup", json!({ "n": 1 }));
+        let assistant = |id: &str| {
+            Message::Assistant(crate::message::AssistantMessage {
+                id: None,
+                content: Vec::new(),
+                tool_calls: vec![call(id)],
+                usage: None,
+                origin: None,
+            })
+        };
+        ModelRequest::new(vec![
+            Message::system("stable rules"),
+            Message::user("check the ledger"),
+            assistant("c1"),
+            Message::tool("c1", "row 1 ok"),
+            assistant("c2"),
+            Message::tool("c2", "row 2 ok"),
+        ])
+        .with_cache_segments(vec![PromptSegment {
+            id: "system".into(),
+            role: SegmentRole::System,
+            cacheable: true,
+        }])
+    }
+
+    #[test]
+    fn anthropic_tool_loops_carry_a_breakpoint_on_the_newest_message() {
+        let model = OpenAiModel::openrouter("key").with_model("anthropic/claude-haiku-5.5");
+        let body = model
+            .translate_request_with(&tool_loop_request(), Degrade::default())
+            .unwrap();
+        let json = serde_json::to_value(&body).unwrap();
+        let messages = json["messages"].as_array().unwrap();
+        let marker = json!({ "type": "ephemeral" });
+        // System, the last user turn, and the newest tool result: each call
+        // then reads the previous call's whole prefix instead of rewriting it.
+        assert_eq!(messages[0]["content"][0]["cache_control"], marker);
+        assert_eq!(messages[1]["content"][0]["cache_control"], marker);
+        assert_eq!(messages[5]["content"][0]["cache_control"], marker);
+        assert_eq!(messages[3]["content"], "row 1 ok");
+        assert_eq!(json.to_string().matches("cache_control").count(), 3);
+    }
+
+    #[test]
+    fn non_anthropic_models_on_openrouter_keep_the_system_and_user_breakpoints() {
+        // Gemini behind OpenRouter honours only the last breakpoint and ignores
+        // one on a tool result, which would discard the system one as well.
+        let model = OpenAiModel::openrouter("key").with_model("google/gemini-3.8-flash");
+        let body = model
+            .translate_request_with(&tool_loop_request(), Degrade::default())
+            .unwrap();
+        let json = serde_json::to_value(&body).unwrap();
+        assert_eq!(json.to_string().matches("cache_control").count(), 2);
+        assert_eq!(json["messages"][5]["content"], "row 2 ok");
+    }
+
+    #[test]
+    fn the_tail_breakpoint_skips_a_trailing_message_without_text() {
+        let model = OpenAiModel::openrouter("key").with_model("anthropic/claude-haiku-5.5");
+        let mut request = tool_loop_request();
+        request.messages.push(Message::assistant(""));
+        let body = model
+            .translate_request_with(&request, Degrade::default())
+            .unwrap();
+        let json = serde_json::to_value(&body).unwrap();
+        assert_eq!(json.to_string().matches("cache_control").count(), 3);
+        assert_eq!(
+            json["messages"][5]["content"][0]["cache_control"],
+            json!({ "type": "ephemeral" })
+        );
+    }
+
     #[test]
     fn tinyhumans_anthropic_without_a_declared_prefix_is_unmarked() {
         let model = OpenAiModel::tinyhumans("k", "anthropic/claude-sonnet-4-6");

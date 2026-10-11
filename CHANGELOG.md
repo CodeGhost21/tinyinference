@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Fixed
+
+- OpenAI-compatible provider: an Anthropic-family request that asks for
+  prompt-cache breakpoints now also marks its newest text-bearing message. In a
+  tool loop the last user message stops moving, so the assistant tool calls and
+  tool results behind it were re-sent uncached on every call. Measured on
+  `anthropic/claude-haiku-5.5` through OpenRouter over an 8-round tool loop:
+  31% of prompt tokens read from cache before, 82% after. Other models keep the
+  system and last-user breakpoints (Gemini honours only the last breakpoint).
+
 ## 0.3.1
 
 ### Breaking changes
