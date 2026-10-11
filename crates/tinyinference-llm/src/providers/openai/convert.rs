@@ -198,6 +198,25 @@ pub(super) fn translate_user_content(blocks: &[ContentBlock]) -> Result<MessageC
 /// block to sit on; multi-part content gets the marker on its final text part.
 /// Messages without a text part (image-only) are left untouched.
 pub(super) fn apply_cache_breakpoints(messages: &mut [ChatMessageWire]) {
+    match std::env::var("SCRATCH_CACHE_VARIANT").as_deref() {
+        Ok("none") => return,
+        Ok("last") => {
+            if let Some(m) = messages.iter_mut().find(|m| m.role == "system") {
+                mark_last_text_part(m);
+            }
+            if let Some(m) = messages.last_mut() {
+                mark_last_text_part(m);
+            }
+            return;
+        }
+        Ok("lastonly") => {
+            if let Some(m) = messages.last_mut() {
+                mark_last_text_part(m);
+            }
+            return;
+        }
+        _ => {}
+    }
     for role in ["system", "user"] {
         if let Some(message) = messages.iter_mut().rev().find(|m| m.role == role) {
             mark_last_text_part(message);
