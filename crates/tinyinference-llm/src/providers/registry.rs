@@ -180,27 +180,65 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
         };
         let provider_options =
             merge_route_options(route_options, options.default_provider_options.clone());
+        let native_num_ctx = if spec.kind == ProviderKind::Ollama {
+            provider_options
+                .as_ref()
+                .and_then(|value| value.get("options"))
+                .and_then(|value| value.get("num_ctx"))
+                .map(|value| {
+                    value
+                        .as_u64()
+                        .and_then(|value| u32::try_from(value).ok())
+                        .filter(|value| *value > 0)
+                        .ok_or_else(|| {
+                            Error::Validation(
+                                "Ollama num_ctx must be a positive 32-bit integer".into(),
+                            )
+                        })
+                })
+                .transpose()?
+        } else {
+            None
+        };
+        let config = OpenAiConfig {
+            provider_name: &spec.provider,
+            endpoint,
+            api_key: &key,
+            auth_style: auth.clone(),
+            model: &spec.model,
+            temperature_unsupported_models: options.temperature_unsupported_models,
+            temperature_override: options.temperature_override,
+            merge_system_into_user: options.merge_system_into_user,
+            extra_headers: options.extra_headers,
+            native_tool_calling: options.native_tool_calling.or(local.then_some(false)),
+            vision: options.vision.or(local.then_some(false)),
+            default_provider_options: provider_options,
+            responses_api_primary: oauth,
+            responses_omit_max_output_tokens: oauth,
+            extra_query_params: options.extra_query_params,
+            user_agent: options.user_agent,
+            explicit_cache_control: !local && endpoint_is_openrouter(endpoint),
+        };
+        if local {
+            let mut resolved = spec.clone();
+            resolved.base_url = endpoint.to_owned();
+            let model =
+                super::openai::OpenAiModel::from_spec(resolved, &key)?.with_auth_style(auth);
+            let mut model =
+                super::openai::config::configure_openai_model(model, config, options.http.clone());
+            let num_ctx = native_num_ctx;
+            if let Some(num_ctx) = num_ctx {
+                model = model.with_local_num_ctx(num_ctx);
+            }
+            return Ok(Arc::new(LocalRegistryModel {
+                model,
+                apply_context: num_ctx.is_some(),
+                ready: tokio::sync::OnceCell::new(),
+            }));
+        }
         Ok(super::openai::config::build_openai_model_with(
-            OpenAiConfig {
-                provider_name: &spec.provider,
-                endpoint,
-                api_key: &key,
-                auth_style: auth,
-                model: &spec.model,
-                temperature_unsupported_models: options.temperature_unsupported_models,
-                temperature_override: options.temperature_override,
-                merge_system_into_user: options.merge_system_into_user,
-                extra_headers: options.extra_headers,
-                native_tool_calling: options.native_tool_calling.or(local.then_some(false)),
-                vision: options.vision.or(local.then_some(false)),
-                default_provider_options: provider_options,
-                responses_api_primary: oauth,
-                responses_omit_max_output_tokens: oauth,
-                extra_query_params: options.extra_query_params,
-                user_agent: options.user_agent,
-                explicit_cache_control: !local && endpoint_is_openrouter(endpoint),
-            },
-            !local,
+            config,
+            true,
             options.http.clone(),
         ))
     }
@@ -297,6 +335,70 @@ fn effective_endpoint<'a>(
     options
         .codex
         .map_or(&spec.base_url, |route| &route.endpoint)
+}
+
+// Configuring Ollama requires its native endpoint; the compatible wire ignores
+// num_ctx. One successful setup is shared by all concurrent calls on this model.
+struct LocalRegistryModel {
+    model: super::openai::OpenAiModel,
+    apply_context: bool,
+    ready: tokio::sync::OnceCell<()>,
+}
+
+impl LocalRegistryModel {
+    async fn prepare(&self) -> Result<()> {
+        if self.apply_context {
+            self.ready
+                .get_or_try_init(|| async { self.model.warm_up().await })
+                .await?;
+        }
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl ChatModel<()> for LocalRegistryModel {
+    fn profile(&self) -> Option<&crate::model::ModelProfile> {
+        <super::openai::OpenAiModel as ChatModel<()>>::profile(&self.model)
+    }
+    fn supports_input(
+        &self,
+        modality: crate::model::InputModality,
+        mime: &str,
+        source: crate::model::InputSource,
+    ) -> bool {
+        <super::openai::OpenAiModel as ChatModel<()>>::supports_input(
+            &self.model,
+            modality,
+            mime,
+            source,
+        )
+    }
+    fn cache_identity(&self) -> Option<String> {
+        <super::openai::OpenAiModel as ChatModel<()>>::cache_identity(&self.model)
+    }
+    async fn invoke(
+        &self,
+        state: &(),
+        request: crate::model::ModelRequest,
+    ) -> Result<crate::model::ModelResponse> {
+        self.prepare().await?;
+        self.model.invoke(state, request).await
+    }
+    async fn stream(
+        &self,
+        state: &(),
+        request: crate::model::ModelRequest,
+    ) -> Result<crate::model::ModelStream> {
+        self.prepare().await?;
+        self.model.stream(state, request).await
+    }
+    async fn fetch_deferred(
+        &self,
+        handle: &crate::model::DeferredHandle,
+    ) -> Result<crate::model::DeferredStatus> {
+        <super::openai::OpenAiModel as ChatModel<()>>::fetch_deferred(&self.model, handle).await
+    }
 }
 
 // Route defaults form a base; host settings override only the fields supplied.

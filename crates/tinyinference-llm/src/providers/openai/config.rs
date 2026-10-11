@@ -123,15 +123,24 @@ pub(crate) fn build_openai_model_with(
     anthropic_cache_control: bool,
     http: Option<reqwest::Client>,
 ) -> Arc<dyn ChatModel<()>> {
-    let mut model = OpenAiModel::compatible_provider(
+    let model = OpenAiModel::compatible_provider(
         config.provider_name,
         config.api_key,
         config.endpoint,
         config.model,
     )
-    .with_auth_style(config.auth_style)
+    .with_auth_style(config.auth_style.clone())
     .with_anthropic_cache_control(anthropic_cache_control);
 
+    Arc::new(configure_openai_model(model, config, http))
+}
+
+/// Applies transport and capability overrides to an already selected adapter.
+pub(crate) fn configure_openai_model(
+    mut model: OpenAiModel,
+    config: OpenAiConfig<'_>,
+    http: Option<reqwest::Client>,
+) -> OpenAiModel {
     if let Some(http) = http {
         model = model.with_request_options(ProviderRequestOptions {
             http: Some(http),
@@ -177,7 +186,7 @@ pub(crate) fn build_openai_model_with(
         model = model.with_responses_omit_max_output_tokens();
     }
 
-    Arc::new(model)
+    model
 }
 
 /// Builds a conventional hosted OpenAI-compatible model.
