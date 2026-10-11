@@ -1,3 +1,4 @@
+//! Loopback integration coverage of stateless provider construction.
 use tinyinference_llm::providers::openai::codex::OpenAiCodexRouting;
 use tinyinference_llm::providers::registry::{
     CredentialResolver, ProviderBuildOptions, ProviderRegistry,

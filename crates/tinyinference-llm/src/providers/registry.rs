@@ -22,6 +22,9 @@ use super::{ProviderKind, ProviderSpec};
 /// does not require an API key.
 pub trait CredentialResolver: Send + Sync {
     /// Reads the credential without making an inference request.
+    ///
+    /// # Errors
+    /// Returns the credential source's failure when lookup cannot complete.
     fn resolve(&self, spec: &ProviderSpec) -> Result<String>;
 }
 
@@ -121,6 +124,10 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
     }
 
     /// Builds a model using default adapter settings.
+    ///
+    /// # Errors
+    /// Returns validation failures for empty models/endpoints or missing required
+    /// credentials, and propagates credential resolver errors.
     pub fn build(&self, spec: &ProviderSpec) -> Result<Arc<dyn ChatModel<()>>> {
         self.build_with(spec, ProviderBuildOptions::default())
     }
@@ -130,6 +137,9 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
     /// First-party Anthropic endpoints use Messages when native tools are not
     /// explicitly disabled. Other endpoints use Chat Completions; Codex OAuth
     /// routing selects Responses and omits max_output_tokens.
+    ///
+    /// # Errors
+    /// Returns the same configuration and credential errors as [Self::build].
     pub fn build_with(
         &self,
         spec: &ProviderSpec,
@@ -201,6 +211,10 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
     ///
     /// Extra headers are retained; query parameters and user-agent settings
     /// describe inference transport and are not copied into listing requests.
+    ///
+    /// # Errors
+    /// Returns configuration/credential errors for discoverable routes. Local
+    /// and OAuth routes return None without consulting credentials.
     pub fn discovery_request(
         &self,
         spec: &ProviderSpec,
