@@ -252,15 +252,9 @@ async fn registry_routes_send_the_configured_wire_request() {
                 },
             )
             .unwrap();
-        assert!(
-            model
-                .invoke(
-                    &(),
-                    ModelRequest::new(vec![Message::user("hello")]).with_max_tokens(123)
-                )
-                .await
-                .is_err()
-        );
+        let result = model.invoke(&(), ModelRequest::new(vec![Message::user("hello")]).with_max_tokens(123)).await;
+        eprintln!("variant={variant} result={result:?}");
+        assert!(result.is_err());
         let (header, body) = capture.join().unwrap();
         assert!(header.contains("x-host: test-host"));
         if variant != "anthropic" {
