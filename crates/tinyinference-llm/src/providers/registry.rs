@@ -63,7 +63,8 @@ pub struct ProviderBuildOptions<'a> {
     pub user_agent: Option<&'a str>,
     /// Options merged beneath request-specific options.
     pub default_provider_options: Option<serde_json::Value>,
-    /// Optional Ollama context setting.
+    /// Optional Ollama context setting. Applied through its native API before
+    /// the first inference request; a failed setup prevents inference.
     pub num_ctx: Option<u32>,
     /// Resolved Codex routing. OAuth endpoints have no discoverable listing.
     /// The host supplies any account/originator headers and client identity.

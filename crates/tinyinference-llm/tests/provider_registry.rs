@@ -52,8 +52,16 @@ async fn registry_routes_send_the_configured_wire_request() {
                                 serde_json::from_slice::<serde_json::Value>(&bytes[end + 4..])
                                     .unwrap();
                             if call == 0 && native_ctx.is_some() {
-                                assert!(header.starts_with("POST /api/chat ") || header.starts_with("POST /api/chat?"), "unexpected native route: {}", header.lines().next().unwrap());
+                                assert!(
+                                    header.starts_with("POST /api/chat ")
+                                        || header.starts_with("POST /api/chat?"),
+                                    "unexpected native route: {}",
+                                    header.lines().next().unwrap()
+                                );
                                 assert_eq!(body["options"]["num_ctx"], native_ctx.unwrap());
+                                if variant == "local_override" {
+                                    assert_eq!(body["options"]["num_predict"], 32);
+                                }
                                 if variant != "local_reject" {
                                     stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
                                     break;
@@ -94,7 +102,9 @@ async fn registry_routes_send_the_configured_wire_request() {
             })
         });
         let supplied_options = match variant {
-            "local_override" => serde_json::json!({"options":{"num_ctx":4096},"top_k":7}),
+            "local_override" => {
+                serde_json::json!({"options":{"num_ctx":4096,"num_predict":32},"top_k":7})
+            }
             "openrouter_override" => {
                 serde_json::json!({"provider":{"sort":"latency","only":["DeepInfra"]},"top_k":7})
             }
@@ -121,6 +131,12 @@ async fn registry_routes_send_the_configured_wire_request() {
                 },
             )
             .unwrap();
+        if let Some(num_ctx) = native_ctx {
+            assert_eq!(
+                model.profile().unwrap().max_input_tokens,
+                Some(num_ctx as u64)
+            );
+        }
         let result = model
             .invoke(
                 &(),

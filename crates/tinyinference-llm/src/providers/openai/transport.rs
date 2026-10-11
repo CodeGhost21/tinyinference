@@ -1144,12 +1144,20 @@ impl OpenAiModel {
             local_options_object(&self.default_provider_options),
             self.keep_alive.as_deref(),
         );
-        self.authorized(self.http_client().post(&url))
+        let response = self
+            .authorized(self.http_client().post(&url))
             .await?
             .json(&body)
             .send()
             .await
             .map_err(|error| Error::Model(format!("openai warm-up of {url} failed: {error}")))?;
+        if !response.status().is_success() {
+            return Err(Error::Model(format!(
+                "{} native context setup returned HTTP {}",
+                self.provider,
+                response.status().as_u16()
+            )));
+        }
         Ok(())
     }
 
