@@ -268,7 +268,7 @@ async fn zero_cached_discovery_is_not_remembered_and_keeps_valid_output_cap() {
     let resolver = ContextWindowResolver::new();
     let cache = ModelLimitsCache::default();
     let request = DiscoveryRequest::new("https://provider.example/v1", "model");
-    cache.insert_discovered(&request.endpoint, &request.model, Some(super::super::discover::ModelLimits {
+    cache.insert_discovered_variant(&request.endpoint, &request.model, &request.cache_variant(), Some(super::super::discover::ModelLimits {
         context_window: Some(0), max_output_tokens: Some(2048), input_modalities: None,
         source: LimitSource::ProviderListing,
     }));
