@@ -12,7 +12,7 @@ async fn registry_routes_send_the_configured_wire_request() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    for variant in ["local", "cloud", "codex", "openrouter", "optional", "local_override", "openrouter_override"] {
+    for variant in ["optional", "local", "cloud", "codex", "openrouter", "local_override", "openrouter_override"] {
         let oauth = variant == "codex";
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
