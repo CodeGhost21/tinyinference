@@ -205,7 +205,6 @@ pub(crate) async fn discover_model_limits_with_guard(
     {
         Ok(limits) => limits,
         Err(_) => {
-            siblings.clear();
             tracing::warn!(
                 endpoint = %request.endpoint,
                 model = %request.model,
@@ -226,7 +225,7 @@ pub(crate) async fn discover_model_limits_with_guard(
     );
     let mut resolved = limits.clone();
     access(&mut || {
-        // Publish all listing facts only after every probe completes and the
+        // Publish completed listing facts after probes finish or time out and the
         // caller's generation is still current. No stale sibling survives clear.
         for (id, limits) in &siblings {
             cache.insert_discovered_variant(&request.endpoint, id, &variant, Some(limits.clone()));

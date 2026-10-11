@@ -55,7 +55,8 @@ pub struct ResolvedWindow {
 }
 
 /// Inputs already resolved by the host's routing/configuration adapter.
-#[derive(Clone, Debug, Default)]
+/// Debug output omits discovery details, which may contain credentials.
+#[derive(Clone, Default)]
 pub struct ContextWindowInput<'a> {
     /// A non-zero explicit override takes precedence without discovery.
     pub config_override: Option<u64>,
@@ -68,6 +69,19 @@ pub struct ContextWindowInput<'a> {
     pub has_local_profile: bool,
     /// Local fallback used only when no static estimate is known.
     pub local_window: Option<u64>,
+}
+
+impl std::fmt::Debug for ContextWindowInput<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ContextWindowInput")
+            .field("config_override", &self.config_override)
+            .field("discovery", &self.discovery.map(|_| "[redacted]"))
+            .field("static_window", &self.static_window)
+            .field("has_local_profile", &self.has_local_profile)
+            .field("local_window", &self.local_window)
+            .finish()
+    }
 }
 
 /// Instance-owned route/model and discovery-identity precedence resolution.
