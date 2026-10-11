@@ -11,6 +11,7 @@ async fn registry_routes_send_the_configured_wire_request() {
     use tokio::net::TcpListener;
 
     for variant in [
+        "local_reject",
         "optional",
         "local",
         "cloud",
@@ -22,35 +23,52 @@ async fn registry_routes_send_the_configured_wire_request() {
         let oauth = variant == "codex";
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
+        let native_ctx = match variant {
+            "local" | "local_reject" => Some(8192),
+            "local_override" => Some(4096),
+            _ => None,
+        };
         let capture = tokio::spawn(async move {
-            let (mut stream, _) = listener.accept().await.unwrap();
-            let mut bytes = Vec::new();
-            let mut buffer = [0; 4096];
-            loop {
-                let read = stream.read(&mut buffer).await.unwrap();
-                assert!(read > 0, "connection closed before request");
-                bytes.extend_from_slice(&buffer[..read]);
-                if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
-                    let header = String::from_utf8_lossy(&bytes[..end]);
-                    let length: usize = header
-                        .lines()
-                        .find_map(|line| {
-                            line.to_ascii_lowercase()
-                                .strip_prefix("content-length:")
-                                .map(|value| value.trim().parse().unwrap())
-                        })
-                        .unwrap();
-                    if bytes.len() >= end + 4 + length {
-                        let body =
-                            serde_json::from_slice::<serde_json::Value>(&bytes[end + 4..]).unwrap();
-                        stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
-                        return (header.to_string(), body);
+            for call in 0..if native_ctx.is_some() { 2 } else { 1 } {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut bytes = Vec::new();
+                let mut buffer = [0; 4096];
+                loop {
+                    let read = stream.read(&mut buffer).await.unwrap();
+                    assert!(read > 0, "connection closed before request");
+                    bytes.extend_from_slice(&buffer[..read]);
+                    if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                        let header = String::from_utf8_lossy(&bytes[..end]);
+                        let length: usize = header
+                            .lines()
+                            .find_map(|line| {
+                                line.to_ascii_lowercase()
+                                    .strip_prefix("content-length:")
+                                    .map(|value| value.trim().parse().unwrap())
+                            })
+                            .unwrap();
+                        if bytes.len() >= end + 4 + length {
+                            let body =
+                                serde_json::from_slice::<serde_json::Value>(&bytes[end + 4..])
+                                    .unwrap();
+                            if call == 0 && native_ctx.is_some() {
+                                assert!(header.starts_with("POST /api/chat "));
+                                assert_eq!(body["options"]["num_ctx"], native_ctx.unwrap());
+                                if variant != "local_reject" {
+                                    stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
+                                    break;
+                                }
+                            }
+                            stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
+                            return (header.to_string(), body);
+                        }
                     }
                 }
             }
+            unreachable!("the final captured request always returns")
         });
         let kind = match variant {
-            "local" | "local_override" => ProviderKind::Ollama,
+            "local" | "local_override" | "local_reject" => ProviderKind::Ollama,
             "openrouter" | "openrouter_override" => ProviderKind::OpenRouter,
             _ => ProviderKind::OpenAi,
         };
@@ -111,6 +129,13 @@ async fn registry_routes_send_the_configured_wire_request() {
             .await;
         assert!(result.is_err());
         let (header, body) = capture.await.unwrap();
+        if variant == "local_reject" {
+            assert!(
+                matches!(&result, Err(tinyinference_llm::Error::Model(message)) if message.contains("400")),
+                "native setup rejection must stop inference: {result:?}"
+            );
+            continue;
+        }
         assert!(header.contains("x-host: test-host"));
         assert!(header.contains("client_version=test-version"));
         assert_eq!(body["model"], spec.model);

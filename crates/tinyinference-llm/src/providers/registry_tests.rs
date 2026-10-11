@@ -231,7 +231,10 @@ fn local_registry_profiles_leave_unprobed_context_windows_unknown() {
         ProviderKind::LlamaCpp,
         ProviderKind::Vllm,
     ] {
-        let spec = ProviderSpec::for_kind(kind);
+        let mut spec = ProviderSpec::for_kind(kind);
+        if spec.model.is_empty() {
+            spec.model = "local-model".into();
+        }
         let model = registry().build(&spec).unwrap();
         assert_eq!(
             model.profile().unwrap().max_input_tokens,

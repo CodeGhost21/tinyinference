@@ -200,6 +200,7 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
         } else {
             None
         };
+        let native_options = provider_options.clone();
         let config = OpenAiConfig {
             provider_name: &spec.provider,
             endpoint,
@@ -229,6 +230,9 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
             let num_ctx = native_num_ctx;
             if let Some(num_ctx) = num_ctx {
                 model = model.with_local_num_ctx(num_ctx);
+                if let Some(native_options) = native_options {
+                    model = model.with_default_provider_options(native_options);
+                }
             }
             return Ok(Arc::new(LocalRegistryModel {
                 model,
