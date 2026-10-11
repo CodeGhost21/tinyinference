@@ -22,12 +22,14 @@ pub(super) fn translate_message(message: &Message) -> Result<ChatMessageWire> {
             )?)),
             tool_calls: Vec::new(),
             tool_call_id: None,
+            reasoning_content: None,
         },
         Message::User(user) => ChatMessageWire {
             role: "user".to_string(),
             content: Some(translate_user_content(&user.content)?),
             tool_calls: Vec::new(),
             tool_call_id: None,
+            reasoning_content: None,
         },
         Message::Assistant(assistant) => {
             if assistant.content.iter().any(|block| {
@@ -71,6 +73,7 @@ pub(super) fn translate_message(message: &Message) -> Result<ChatMessageWire> {
                 content,
                 tool_calls,
                 tool_call_id: None,
+                reasoning_content: None,
             }
         }
         Message::Tool(tool) => ChatMessageWire {
@@ -80,6 +83,7 @@ pub(super) fn translate_message(message: &Message) -> Result<ChatMessageWire> {
             )?)),
             tool_calls: Vec::new(),
             tool_call_id: Some(tool.tool_call_id.clone()),
+            reasoning_content: None,
         },
         // Callers filter `Message::Custom` out of the messages slice before
         // calling this function; it is a host-side out-of-band record that is
@@ -642,4 +646,35 @@ pub(super) fn validate_image_ref(image: &crate::message::ImageRef) -> Result<()>
         return Err(Error::Validation("Image input requires PNG/JPEG/WebP/GIF inline base64 or a remote HTTP(S) URL; resolve local paths in the host".into()));
     }
     Ok(())
+}
+
+/// Replays DeepSeek's thinking channel without putting it in visible content.
+pub(super) fn translate_deepseek_message(message: &Message) -> Result<ChatMessageWire> {
+    let mut wire = translate_message(message)?;
+    if let Message::Assistant(assistant) = message {
+        let reasoning: String = assistant
+            .content
+            .iter()
+            .filter_map(|block| block.as_thinking().map(|(text, _)| text))
+            .collect();
+        if !reasoning.is_empty() {
+            wire.reasoning_content = Some(reasoning);
+        }
+    }
+    Ok(wire)
+}
+
+/// DeepSeek cannot enter thinking mode during a tool chain that contains an
+/// unreasoned assistant tool call. A new user turn ends that constraint.
+pub(super) fn deepseek_unreasoned_tool_chain(messages: &[Message]) -> bool {
+    messages
+        .iter()
+        .rev()
+        .take_while(|message| !matches!(message, Message::User(_)))
+        .any(|message| {
+            matches!(message, Message::Assistant(assistant)
+            if !assistant.tool_calls.is_empty()
+                && !assistant.content.iter().any(|block|
+                    block.as_thinking().is_some_and(|(text, _)| !text.is_empty())))
+        })
 }

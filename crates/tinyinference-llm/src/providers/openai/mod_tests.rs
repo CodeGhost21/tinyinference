@@ -3327,3 +3327,73 @@ fn native_transport_support_tracks_selected_wire_and_reference_source() {
         S::Path
     ));
 }
+
+fn deepseek_tool_history(thinking: bool) -> Vec<Message> {
+    vec![
+        Message::user("Call ping, then answer."),
+        Message::Assistant(AssistantMessage {
+            id: None,
+            content: if thinking {
+                vec![
+                    ContentBlock::thinking("first "),
+                    ContentBlock::thinking("second"),
+                ]
+            } else {
+                Vec::new()
+            },
+            tool_calls: vec![ToolCall {
+                id: "call-1".into(),
+                name: "ping".into(),
+                arguments: json!({}),
+                invalid: None,
+            }],
+            usage: None,
+            origin: None,
+        }),
+        Message::tool("call-1", "pong"),
+    ]
+}
+
+#[test]
+fn deepseek_keeps_unreasoned_tool_continuations_out_of_thinking_mode() {
+    let model = model();
+    let request = ModelRequest::new(deepseek_tool_history(false))
+        .with_model("deepseek/deepseek-v4.1-flash")
+        .with_reasoning_effort(ReasoningEffort::High);
+    let value = serde_json::to_value(model.translate_request(&request).unwrap()).unwrap();
+    assert_eq!(value["reasoning_effort"], "none");
+    assert_eq!(value["messages"][1]["tool_calls"][0]["id"], "call-1");
+}
+
+#[test]
+fn deepseek_restores_requested_thinking_for_a_new_user_turn() {
+    let mut messages = deepseek_tool_history(false);
+    messages.push(Message::assistant("DONE"));
+    messages.push(Message::user("Now think about the next task."));
+    let request = ModelRequest::new(messages)
+        .with_model("deepseek/deepseek-v4.1-flash")
+        .with_reasoning_effort(ReasoningEffort::High);
+    let value = serde_json::to_value(model().translate_request(&request).unwrap()).unwrap();
+    assert_eq!(value["reasoning_effort"], "high");
+}
+
+#[test]
+fn deepseek_replays_thinking_without_exposing_it_as_visible_content() {
+    let request = ModelRequest::new(deepseek_tool_history(true))
+        .with_model("deepseek/deepseek-v4.1-flash")
+        .with_reasoning_effort(ReasoningEffort::High);
+    let value = serde_json::to_value(model().translate_request(&request).unwrap()).unwrap();
+    assert_eq!(value["reasoning_effort"], "high");
+    assert_eq!(value["messages"][1]["reasoning_content"], "first second");
+    assert!(value["messages"][1].get("content").is_none());
+}
+
+#[test]
+fn other_models_keep_their_requested_thinking_mode_and_wire_shape() {
+    let request = ModelRequest::new(deepseek_tool_history(false))
+        .with_model("gpt-4.1-mini")
+        .with_reasoning_effort(ReasoningEffort::High);
+    let value = serde_json::to_value(model().translate_request(&request).unwrap()).unwrap();
+    assert_eq!(value["reasoning_effort"], "high");
+    assert!(value["messages"][1].get("reasoning_content").is_none());
+}
