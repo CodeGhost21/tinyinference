@@ -221,7 +221,8 @@ pub fn builtin_cloud_supports_responses_api(slug: &str) -> bool {
 
 /// Extract the lowercased authority host from an endpoint URL, dropping the
 /// scheme, any userinfo, the port, and the path. Returns `None` when no host
-/// can be parsed. Tolerant of a missing scheme and of IPv6 literals.
+/// can be parsed. Tolerates a missing scheme and bracketed IPv6 literals.
+/// Bare IPv6 authorities are unsupported; use `[::1]` or `[::1]:8080`.
 pub fn endpoint_host(endpoint: &str) -> Option<String> {
     let s = endpoint.trim();
     // Drop the scheme (`https://…`); tolerate a bare `host/path` form.
