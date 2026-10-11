@@ -38,8 +38,7 @@ where
 
 /// Optional adapter settings applied after host policy and route resolution.
 ///
-/// Header/query values can contain secrets; this type deliberately has no
-/// Debug implementation. The registry never adds host identity or telemetry.
+/// Header/query values can contain secrets; Debug omits their values. The registry never adds host identity or telemetry.
 #[derive(Clone, Default)]
 pub struct ProviderBuildOptions<'a> {
     /// Authentication override. Defaults to Anthropic for that family, no
@@ -72,6 +71,34 @@ pub struct ProviderBuildOptions<'a> {
     pub http: Option<reqwest::Client>,
 }
 
+impl std::fmt::Debug for ProviderBuildOptions<'_> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProviderBuildOptions")
+            .field("temperature_override", &self.temperature_override)
+            .field("native_tool_calling", &self.native_tool_calling)
+            .field("vision", &self.vision)
+            .field(
+                "header_names",
+                &self
+                    .extra_headers
+                    .iter()
+                    .map(|(name, _)| name)
+                    .collect::<Vec<_>>(),
+            )
+            .field(
+                "query_names",
+                &self
+                    .extra_query_params
+                    .iter()
+                    .map(|(name, _)| name)
+                    .collect::<Vec<_>>(),
+            )
+            .field("codex_oauth", &self.codex.map(|route| route.using_oauth))
+            .finish_non_exhaustive()
+    }
+}
+
 /// Constructs third-party and local adapters from a host-resolved spec.
 ///
 /// ProviderKind::TinyHumans is treated as an ordinary compatible endpoint:
@@ -79,6 +106,14 @@ pub struct ProviderBuildOptions<'a> {
 /// managed gateway extension, which should bypass this factory.
 pub struct ProviderRegistry<R> {
     credentials: R,
+}
+
+impl<R> std::fmt::Debug for ProviderRegistry<R> {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ProviderRegistry")
+            .finish_non_exhaustive()
+    }
 }
 
 impl<R: CredentialResolver> ProviderRegistry<R> {

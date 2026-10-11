@@ -17,7 +17,11 @@ fn builds_cloud_and_local_profiles_from_resolved_specs() {
         let profile = model.profile().unwrap();
         assert_eq!(profile.model.as_deref(), Some(spec.model.as_str()));
         assert_eq!(profile.tool_calling, kind != ProviderKind::Ollama);
-        assert!(!model.cache_identity().unwrap().contains("test-key"));
+        assert!(
+            model
+                .cache_identity()
+                .is_none_or(|identity| !identity.contains("test-key"))
+        );
     }
 }
 
@@ -151,4 +155,121 @@ fn price_ordering_is_only_supplied_to_openrouter() {
         openrouter_default_provider_options("https://api.openai.com/v1"),
         None
     );
+}
+
+#[tokio::test]
+async fn local_and_codex_routes_send_the_configured_wire_request() {
+    use crate::message::Message;
+    use crate::model::ModelRequest;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+
+    for oauth in [false, true] {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let capture = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            let mut bytes = Vec::new();
+            let mut buffer = [0; 4096];
+            loop {
+                let read = stream.read(&mut buffer).unwrap();
+                assert!(read > 0, "connection closed before request");
+                bytes.extend_from_slice(&buffer[..read]);
+                if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                    let header = String::from_utf8_lossy(&bytes[..end]);
+                    let length: usize = header
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .map(|value| value.trim().parse().unwrap())
+                        })
+                        .unwrap();
+                    if bytes.len() >= end + 4 + length {
+                        let body =
+                            serde_json::from_slice::<serde_json::Value>(&bytes[end + 4..]).unwrap();
+                        stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").unwrap();
+                        return (header.to_string(), body);
+                    }
+                }
+            }
+        });
+        let mut spec = ProviderSpec::for_kind(if oauth {
+            ProviderKind::OpenAi
+        } else {
+            ProviderKind::Ollama
+        });
+        spec.base_url = format!("http://{address}/v1");
+        let route = OpenAiCodexRouting {
+            endpoint: spec.base_url.clone(),
+            using_oauth: oauth,
+            account_id: None,
+        };
+        let headers = vec![("X-Host".into(), "test-host".into())];
+        let query = vec![("client_version".into(), "test-version".into())];
+        let model = registry()
+            .build_with(
+                &spec,
+                ProviderBuildOptions {
+                    temperature_override: Some(0.25),
+                    num_ctx: Some(8192),
+                    codex: oauth.then_some(&route),
+                    extra_headers: &headers,
+                    extra_query_params: &query,
+                    http: Some(reqwest::Client::builder().no_proxy().build().unwrap()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(
+            model
+                .invoke(
+                    &(),
+                    ModelRequest::new(vec![Message::user("hello")]).with_max_tokens(123)
+                )
+                .await
+                .is_err()
+        );
+        let (header, body) = capture.join().unwrap();
+        assert!(header.contains("x-host: test-host"));
+        assert!(header.contains("client_version=test-version"));
+        assert_eq!(body["model"], spec.model);
+        assert_eq!(body["temperature"], 0.25);
+        if oauth {
+            assert!(header.starts_with("POST /v1/responses?"));
+            assert!(header.contains("authorization: Bearer test-key"));
+            assert!(body.get("max_output_tokens").is_none());
+        } else {
+            assert!(header.starts_with("POST /v1/chat/completions?"));
+            assert!(!header.contains("authorization:"));
+            assert_eq!(body["options"]["num_ctx"], 8192);
+            assert_eq!(body["max_tokens"], 123);
+        }
+    }
+}
+
+#[test]
+fn debugging_registry_options_never_discloses_transport_secrets() {
+    let headers = vec![("Authorization".into(), "secret-header".into())];
+    let query = vec![("token".into(), "secret-query".into())];
+    let route = OpenAiCodexRouting {
+        endpoint: "https://user:secret-password@example.com?token=secret-url".into(),
+        using_oauth: true,
+        account_id: Some("secret-account".into()),
+    };
+    let debug = format!(
+        "{:?}",
+        ProviderBuildOptions {
+            extra_headers: &headers,
+            extra_query_params: &query,
+            codex: Some(&route),
+            user_agent: Some("secret-user-agent"),
+            ..Default::default()
+        }
+    );
+    assert!(!debug.contains("secret"));
+    assert!(debug.contains("Authorization"));
 }
