@@ -50,7 +50,7 @@ pub struct ResolvedWindow {
     pub window: Option<u64>,
     /// Source selected by precedence.
     pub source: WindowSource,
-    /// Provider-reported output ceiling when discovery supplied the window.
+    /// Positive provider-reported output ceiling, including partial discovery.
     pub max_output_tokens: Option<u64>,
 }
 
@@ -78,7 +78,7 @@ pub struct ContextWindowInput<'a> {
 /// host migration's synchronous lookup semantics.
 #[derive(Debug, Default)]
 pub struct ContextWindowResolver {
-    remembered: Mutex<HashMap<(String, String), u64>>,
+    remembered: Mutex<HashMap<(String, String), ResolvedWindow>>,
 }
 
 impl ContextWindowResolver {
@@ -93,7 +93,7 @@ impl ContextWindowResolver {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .get(&key(provider, model))
-            .copied()
+            .and_then(|resolved| resolved.window)
     }
 
     /// Clears remembered windows when the host replaces runtime identity.
@@ -104,10 +104,11 @@ impl ContextWindowResolver {
             .clear();
     }
 
-    /// Resolves override > discovered/learned > static/local > unknown.
+    /// Resolves override > discovered/learned > remembered > static/local > unknown.
     ///
-    /// Discovery failures fall through to hints; discovery bounds/caching are
-    /// supplied by the existing request and ModelLimitsCache. No diagnostics
+    /// Discovery failures retain remembered provenance and output ceilings.
+    /// Partial discovery can supply an output ceiling independently of the window.
+    /// Discovery bounds/caching come from the request and `ModelLimitsCache`. No diagnostics
     /// or telemetry are emitted: hosts use the returned source label.
     pub async fn resolve(
         &self,
@@ -124,35 +125,60 @@ impl ContextWindowResolver {
                 max_output_tokens: None,
             };
         }
-        if let Some(request) = input.discovery
-            && let Some(limits) = discover_model_limits_with(fetcher, cache, request).await
-            && let Some(window) = limits.context_window
+        let limits = if let Some(request) = input.discovery {
+            discover_model_limits_with(fetcher, cache, request).await
+        } else {
+            None
+        };
+        let max_output_tokens = limits
+            .as_ref()
+            .and_then(|limits| limits.max_output_tokens)
+            .filter(|tokens| *tokens > 0);
+        if let Some(limits) = limits
+            && let Some(window) = limits.context_window.filter(|window| *window > 0)
         {
             let source = match limits.source {
                 LimitSource::LearnedFromOverflow => WindowSource::LearnedFromOverflow,
                 _ => WindowSource::ProviderReported,
             };
+            let resolved = ResolvedWindow {
+                window: Some(window),
+                source,
+                max_output_tokens,
+            };
             self.remembered
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
-                .insert(key(provider, model), window);
-            return ResolvedWindow {
-                window: Some(window),
-                source,
-                max_output_tokens: limits.max_output_tokens,
-            };
+                .insert(key(provider, model), resolved);
+            return resolved;
         }
-        let (window, source) = if let Some(window) = input.static_window {
-            (Some(window), WindowSource::StaticGuess)
-        } else if input.has_local_profile {
-            (input.local_window, WindowSource::LocalProfile)
-        } else {
-            (None, WindowSource::Unknown)
-        };
+        {
+            let remembered = self
+                .remembered
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if let Some(resolved) = remembered.get(&key(provider, model)) {
+                return ResolvedWindow {
+                    max_output_tokens: max_output_tokens.or(resolved.max_output_tokens),
+                    ..*resolved
+                };
+            }
+        }
+        let (window, source) =
+            if let Some(window) = input.static_window.filter(|window| *window > 0) {
+                (Some(window), WindowSource::StaticGuess)
+            } else if input.has_local_profile {
+                (
+                    input.local_window.filter(|window| *window > 0),
+                    WindowSource::LocalProfile,
+                )
+            } else {
+                (None, WindowSource::Unknown)
+            };
         ResolvedWindow {
             window,
             source,
-            max_output_tokens: None,
+            max_output_tokens,
         }
     }
 }

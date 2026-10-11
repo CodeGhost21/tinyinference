@@ -206,7 +206,6 @@ async fn resolver_instances_and_clear_keep_runtime_scopes_independent() {
     assert_eq!(resolver.remembered_window("route", "model"), None);
 }
 
-
 #[tokio::test]
 async fn partial_discovery_keeps_output_caps_with_static_local_or_unknown_context() {
     let fetcher = Listing {
@@ -214,16 +213,40 @@ async fn partial_discovery_keeps_output_caps_with_static_local_or_unknown_contex
         calls: AtomicUsize::new(0),
     };
     let request = DiscoveryRequest::new("https://provider.example/v1", "model")
-        .with_single_model_probe(false).with_ollama_native(false);
+        .with_single_model_probe(false)
+        .with_ollama_native(false);
     for (static_window, local_window, local, window, source) in [
-        (Some(64000), None, false, Some(64000), WindowSource::StaticGuess),
-        (None, Some(8192), true, Some(8192), WindowSource::LocalProfile),
+        (
+            Some(64000),
+            None,
+            false,
+            Some(64000),
+            WindowSource::StaticGuess,
+        ),
+        (
+            None,
+            Some(8192),
+            true,
+            Some(8192),
+            WindowSource::LocalProfile,
+        ),
         (None, None, false, None, WindowSource::Unknown),
     ] {
-        let resolved = ContextWindowResolver::new().resolve("route", "model", ContextWindowInput {
-            discovery: Some(&request), static_window, local_window, has_local_profile: local,
-            ..Default::default()
-        }, &fetcher, &ModelLimitsCache::default()).await;
+        let resolved = ContextWindowResolver::new()
+            .resolve(
+                "route",
+                "model",
+                ContextWindowInput {
+                    discovery: Some(&request),
+                    static_window,
+                    local_window,
+                    has_local_profile: local,
+                    ..Default::default()
+                },
+                &fetcher,
+                &ModelLimitsCache::default(),
+            )
+            .await;
         assert_eq!(resolved.window, window);
         assert_eq!(resolved.source, source);
         assert_eq!(resolved.max_output_tokens, Some(2048));
@@ -236,17 +259,37 @@ async fn discovery_failure_retains_remembered_window_provenance_and_output_cap()
         let resolver = ContextWindowResolver::new();
         let cache = ModelLimitsCache::default();
         let request = DiscoveryRequest::new("https://provider.example/v1", "model")
-            .with_single_model_probe(false).with_ollama_native(false);
+            .with_single_model_probe(false)
+            .with_ollama_native(false);
         if learned {
             cache.insert_learned(&request.endpoint, &request.model, 64000);
         }
-        let first = resolver.resolve(" Route ", " MODEL ", ContextWindowInput {
-            discovery: Some(&request), ..Default::default()
-        }, &listing(Some(128000)), &cache).await;
+        let first = resolver
+            .resolve(
+                " Route ",
+                " MODEL ",
+                ContextWindowInput {
+                    discovery: Some(&request),
+                    ..Default::default()
+                },
+                &listing(Some(128000)),
+                &cache,
+            )
+            .await;
         cache.clear();
-        let next = resolver.resolve("route", "model", ContextWindowInput {
-            discovery: Some(&request), static_window: Some(256000), ..Default::default()
-        }, &listing(None), &cache).await;
+        let next = resolver
+            .resolve(
+                "route",
+                "model",
+                ContextWindowInput {
+                    discovery: Some(&request),
+                    static_window: Some(256000),
+                    ..Default::default()
+                },
+                &listing(None),
+                &cache,
+            )
+            .await;
         assert_eq!(next, first);
     }
 }
@@ -254,10 +297,21 @@ async fn discovery_failure_retains_remembered_window_provenance_and_output_cap()
 #[tokio::test]
 async fn zero_host_hints_are_unknown_and_do_not_hide_valid_local_context() {
     for (local_window, expected) in [(Some(8192), Some(8192)), (Some(0), None)] {
-        let resolved = ContextWindowResolver::new().resolve("route", "model", ContextWindowInput {
-            config_override: Some(0), static_window: Some(0),
-            local_window, has_local_profile: true, ..Default::default()
-        }, &listing(None), &ModelLimitsCache::default()).await;
+        let resolved = ContextWindowResolver::new()
+            .resolve(
+                "route",
+                "model",
+                ContextWindowInput {
+                    config_override: Some(0),
+                    static_window: Some(0),
+                    local_window,
+                    has_local_profile: true,
+                    ..Default::default()
+                },
+                &listing(None),
+                &ModelLimitsCache::default(),
+            )
+            .await;
         assert_eq!(resolved.window, expected);
         assert_eq!(resolved.source, WindowSource::LocalProfile);
     }
@@ -268,13 +322,30 @@ async fn zero_cached_discovery_is_not_remembered_and_keeps_valid_output_cap() {
     let resolver = ContextWindowResolver::new();
     let cache = ModelLimitsCache::default();
     let request = DiscoveryRequest::new("https://provider.example/v1", "model");
-    cache.insert_discovered_variant(&request.endpoint, &request.model, &request.cache_variant(), Some(super::super::discover::ModelLimits {
-        context_window: Some(0), max_output_tokens: Some(2048), input_modalities: None,
-        source: LimitSource::ProviderListing,
-    }));
-    let resolved = resolver.resolve("route", "model", ContextWindowInput {
-        discovery: Some(&request), static_window: Some(64000), ..Default::default()
-    }, &listing(None), &cache).await;
+    cache.insert_discovered_variant(
+        &request.endpoint,
+        &request.model,
+        &request.cache_variant(),
+        Some(super::super::discover::ModelLimits {
+            context_window: Some(0),
+            max_output_tokens: Some(2048),
+            input_modalities: None,
+            source: LimitSource::ProviderListing,
+        }),
+    );
+    let resolved = resolver
+        .resolve(
+            "route",
+            "model",
+            ContextWindowInput {
+                discovery: Some(&request),
+                static_window: Some(64000),
+                ..Default::default()
+            },
+            &listing(None),
+            &cache,
+        )
+        .await;
     assert_eq!(resolved.window, Some(64000));
     assert_eq!(resolved.max_output_tokens, Some(2048));
     assert_eq!(resolver.remembered_window("route", "model"), None);
