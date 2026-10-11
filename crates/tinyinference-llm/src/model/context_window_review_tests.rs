@@ -594,3 +594,55 @@ fn regression_input_debug_omits_discovery_credentials() {
     }
     assert!(debug.contains("8192"));
 }
+
+#[tokio::test]
+async fn learned_overflow_still_bounds_pending_discovery_after_clear() {
+    let resolver = Arc::new(ContextWindowResolver::new());
+    let cache = Arc::new(ModelLimitsCache::default());
+    let request = request();
+    cache.insert_learned(&request.endpoint, &request.model, 64000);
+    let fetcher = Arc::new(HeldListing {
+        started: Notify::new(),
+        release: Notify::new(),
+    });
+    let task = {
+        let resolver = resolver.clone();
+        let cache = cache.clone();
+        let fetcher = fetcher.clone();
+        let request = request.clone();
+        tokio::spawn(async move {
+            resolver
+                .resolve(
+                    "route",
+                    "model",
+                    ContextWindowInput {
+                        discovery: Some(&request),
+                        ..Default::default()
+                    },
+                    fetcher.as_ref(),
+                    cache.as_ref(),
+                )
+                .await
+        })
+    };
+    fetcher.started.notified().await;
+    resolver.clear();
+    fetcher.release.notify_one();
+    let resolved = task.await.unwrap();
+    assert_eq!(resolved.window, Some(64000));
+    assert_eq!(resolved.source, WindowSource::LearnedFromOverflow);
+    assert_eq!(resolved.max_output_tokens, Some(4096));
+    assert_eq!(resolver.remembered_window("route", "model"), None);
+    assert!(
+        cache
+            .get_variant(&request.endpoint, &request.model, &request.cache_variant())
+            .discovered
+            .is_none()
+    );
+    assert!(
+        cache
+            .get_variant(&request.endpoint, "sibling", &request.cache_variant())
+            .discovered
+            .is_none()
+    );
+}
