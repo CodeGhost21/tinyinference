@@ -36,6 +36,7 @@
 
 mod media;
 pub mod registry;
+pub mod response;
 mod types;
 
 // --- real provider integrations ---
