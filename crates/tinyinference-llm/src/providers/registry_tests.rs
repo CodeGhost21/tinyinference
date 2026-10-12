@@ -94,13 +94,6 @@ fn local_and_oauth_discovery_do_not_read_credentials() {
     let registry = ProviderRegistry::new(|_: &ProviderSpec| -> Result<String> {
         panic!("discovery must not consult credentials when no listing exists")
     });
-    let spec = ProviderSpec::for_kind(ProviderKind::Ollama);
-    assert!(
-        registry
-            .discovery_request(&spec, &Default::default())
-            .unwrap()
-            .is_none()
-    );
     let spec = ProviderSpec::for_kind(ProviderKind::LmStudio);
     assert!(
         registry
@@ -298,7 +291,9 @@ fn ollama_registry_exposes_native_model_limit_discovery() {
     let registry = ProviderRegistry::new(|_: &ProviderSpec| Ok(String::new()));
     let mut spec = ProviderSpec::for_kind(ProviderKind::Ollama).with_model("CaseSensitive:latest");
     spec.base_url = "http://localhost:11434/v1".into();
-    let request = registry.discovery_request(&spec, &Default::default()).unwrap()
+    let request = registry
+        .discovery_request(&spec, &Default::default())
+        .unwrap()
         .expect("Ollama has native /api/show model-limit discovery");
     assert!(request.ollama_native_enabled());
     assert_eq!(request.model, "CaseSensitive:latest");

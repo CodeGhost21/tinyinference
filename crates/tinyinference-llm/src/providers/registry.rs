@@ -37,6 +37,32 @@ where
     }
 }
 
+/// Local servers that use only the OpenAI-compatible inference transport.
+///
+/// The resolved spec retains its provider slug, endpoint and model identity.
+/// These families have no automatic model listing or native context setup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LocalCompatibleKind {
+    /// MLX's compatible model server.
+    Mlx,
+    /// OMLX's compatible model server.
+    Omlx,
+    /// An explicitly local, otherwise unclassified compatible server.
+    OpenAi,
+}
+
+/// How an Ollama context option reaches the server.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum OllamaContextMode {
+    /// Apply num_ctx through a native warm-up before inference, preserving the
+    /// registry's default behavior. Failed native setup prevents inference.
+    #[default]
+    Native,
+    /// Keep the compatible request options without issuing a native warm-up.
+    /// Ollama may ignore num_ctx on this wire; no confirmed limit is advertised.
+    CompatibleOnly,
+}
+
 /// Optional adapter settings applied after host policy and route resolution.
 ///
 /// Header/query values can contain secrets; Debug omits their values. The registry never adds host identity or telemetry.
@@ -66,6 +92,13 @@ pub struct ProviderBuildOptions<'a> {
     /// Optional Ollama context setting. Applied through its native API before
     /// the first inference request; a failed setup prevents inference.
     pub num_ctx: Option<u32>,
+    /// Explicit local-compatible family for a Compatible spec. Preserves its
+    /// provider/profile/cache identity, conservative tools/vision, and disables
+    /// automatic listings and Anthropic cache markers.
+    pub local_compatible: Option<LocalCompatibleKind>,
+    /// Ollama context setup policy. Defaults to native setup; CompatibleOnly
+    /// preserves hosts that historically used the compatible wire exclusively.
+    pub ollama_context_mode: OllamaContextMode,
     /// Resolved Codex routing. OAuth endpoints have no discoverable listing.
     /// The host supplies any account/originator headers and client identity.
     pub codex: Option<&'a OpenAiCodexRouting>,
@@ -80,6 +113,8 @@ impl std::fmt::Debug for ProviderBuildOptions<'_> {
             .field("temperature_override", &self.temperature_override)
             .field("native_tool_calling", &self.native_tool_calling)
             .field("vision", &self.vision)
+            .field("local_compatible", &self.local_compatible)
+            .field("ollama_context_mode", &self.ollama_context_mode)
             .field(
                 "header_names",
                 &self
@@ -171,7 +206,15 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
                 ),
             );
         }
-        let local = is_local(&spec.kind);
+        if options.local_compatible.is_some() && spec.kind != ProviderKind::Compatible {
+            return Err(Error::Validation(
+                "local_compatible requires a Compatible provider spec".into(),
+            ));
+        }
+        let compatible_local = options.local_compatible.is_some()
+            || (spec.kind == ProviderKind::Ollama
+                && options.ollama_context_mode == OllamaContextMode::CompatibleOnly);
+        let local = is_local(&spec.kind) || compatible_local;
         let oauth = options.codex.is_some_and(|routing| routing.using_oauth);
         let route_options = if local {
             options
@@ -182,7 +225,7 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
         };
         let provider_options =
             merge_route_options(route_options, options.default_provider_options.clone());
-        let native_num_ctx = if spec.kind == ProviderKind::Ollama {
+        let native_num_ctx = if spec.kind == ProviderKind::Ollama && !compatible_local {
             provider_options
                 .as_ref()
                 .and_then(|value| value.get("options"))
@@ -222,6 +265,13 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
             user_agent: options.user_agent,
             explicit_cache_control: !local && endpoint_is_openrouter(endpoint),
         };
+        if compatible_local {
+            return Ok(super::openai::config::build_openai_model_with(
+                config,
+                false,
+                options.http.clone(),
+            ));
+        }
         if local {
             let mut resolved = spec.clone();
             resolved.base_url = endpoint.to_owned();
@@ -251,21 +301,24 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
     }
 
     /// Builds a listing request with the same endpoint, model and credentials
-    /// as construction. Local families and Codex OAuth return None because
-    /// their model limits are supplied by local profiles or Codex hints.
+    /// as construction. Ollama enables native /api/show limit discovery. Other
+    /// local families and Codex OAuth return None without reading credentials.
     ///
     /// Extra headers are retained; query parameters and user-agent settings
     /// describe inference transport and are not copied into listing requests.
     ///
     /// # Errors
     /// Returns configuration/credential errors for discoverable routes. Local
-    /// and OAuth routes return None without consulting credentials.
+    /// families other than Ollama and OAuth routes do not consult credentials.
     pub fn discovery_request(
         &self,
         spec: &ProviderSpec,
         options: &ProviderBuildOptions<'_>,
     ) -> Result<Option<DiscoveryRequest>> {
-        if is_local(&spec.kind) || options.codex.is_some_and(|route| route.using_oauth) {
+        if (is_local(&spec.kind) && spec.kind != ProviderKind::Ollama)
+            || options.local_compatible.is_some()
+            || options.codex.is_some_and(|route| route.using_oauth)
+        {
             return Ok(None);
         }
         validate(spec)?;
@@ -273,6 +326,9 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
         let endpoint = effective_endpoint(spec, options).trim();
         let model = spec.model.trim();
         let mut request = DiscoveryRequest::new(endpoint, model);
+        if spec.kind == ProviderKind::Ollama {
+            request = request.with_ollama_native(true);
+        }
         if !key.trim().is_empty() {
             request = match effective_auth(spec, options, &key) {
                 AuthStyle::None => request,
@@ -443,7 +499,10 @@ fn merge_route_options(
 
 fn effective_auth(spec: &ProviderSpec, options: &ProviderBuildOptions<'_>, key: &str) -> AuthStyle {
     options.auth_style.clone().unwrap_or_else(|| {
-        if is_local(&spec.kind) || (!spec.requires_api_key && key.is_empty()) {
+        if is_local(&spec.kind)
+            || options.local_compatible.is_some()
+            || (!spec.requires_api_key && key.is_empty())
+        {
             AuthStyle::None
         } else if spec.kind == ProviderKind::Anthropic {
             AuthStyle::Anthropic
