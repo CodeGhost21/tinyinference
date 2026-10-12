@@ -88,6 +88,7 @@ mod convert;
 mod local;
 mod reasoning_tags;
 mod responses;
+pub mod server;
 mod sse;
 mod transport;
 
