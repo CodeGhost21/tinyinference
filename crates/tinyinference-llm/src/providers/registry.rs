@@ -89,8 +89,9 @@ pub struct ProviderBuildOptions<'a> {
     pub user_agent: Option<&'a str>,
     /// Options merged beneath request-specific options.
     pub default_provider_options: Option<serde_json::Value>,
-    /// Optional Ollama context setting. Applied through its native API before
-    /// the first inference request; a failed setup prevents inference.
+    /// Optional Ollama context setting. Native mode applies it before the first
+    /// inference request; a failed setup prevents inference. CompatibleOnly
+    /// retains the option on the compatible wire without native setup.
     pub num_ctx: Option<u32>,
     /// Explicit local-compatible family for a Compatible spec. Preserves its
     /// provider/profile/cache identity, conservative tools/vision, and disables
@@ -175,18 +176,25 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
     /// routing selects Responses and omits max_output_tokens.
     ///
     /// # Errors
-    /// Returns the same configuration and credential errors as [Self::build].
+    /// Returns the same configuration and credential errors as [Self::build],
+    /// and rejects local_compatible settings for non-Compatible specs.
     pub fn build_with(
         &self,
         spec: &ProviderSpec,
         options: ProviderBuildOptions<'_>,
     ) -> Result<Arc<dyn ChatModel<()>>> {
         validate(spec)?;
+        if options.local_compatible.is_some() && spec.kind != ProviderKind::Compatible {
+            return Err(Error::Validation(
+                "local_compatible requires a Compatible provider spec".into(),
+            ));
+        }
         let key = self.resolve_key(spec)?;
         let endpoint = effective_endpoint(spec, &options).trim();
         let model = spec.model.trim();
         let auth = effective_auth(spec, &options, &key);
-        if matches!(auth, AuthStyle::Anthropic)
+        if options.local_compatible.is_none()
+            && matches!(auth, AuthStyle::Anthropic)
             && options.native_tool_calling != Some(false)
             && endpoint_is_anthropic_messages(endpoint)
         {
@@ -205,11 +213,6 @@ impl<R: CredentialResolver> ProviderRegistry<R> {
                     options.vision,
                 ),
             );
-        }
-        if options.local_compatible.is_some() && spec.kind != ProviderKind::Compatible {
-            return Err(Error::Validation(
-                "local_compatible requires a Compatible provider spec".into(),
-            ));
         }
         let compatible_local = options.local_compatible.is_some()
             || (spec.kind == ProviderKind::Ollama
