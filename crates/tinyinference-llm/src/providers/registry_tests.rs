@@ -419,3 +419,20 @@ async fn ollama_registry_native_request_discovers_actual_limits_on_nonstandard_p
     .unwrap();
     assert_eq!(limits.context_window, Some(32768));
 }
+
+#[test]
+fn local_compatible_settings_reject_a_cloud_provider_family() {
+    let registry = ProviderRegistry::new(|_: &ProviderSpec| Ok("key".into()));
+    let spec = ProviderSpec::for_kind(ProviderKind::OpenAi);
+    let error = match registry.build_with(
+        &spec,
+        ProviderBuildOptions {
+            local_compatible: Some(LocalCompatibleKind::Mlx),
+            ..Default::default()
+        },
+    ) {
+        Ok(_) => panic!("cloud family must not be relabeled by local-compatible options"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("requires a Compatible"));
+}
