@@ -195,3 +195,121 @@ async fn registry_routes_send_the_configured_wire_request() {
         }
     }
 }
+
+async fn capture_compatible_request(
+    build: impl FnOnce(&str) -> std::sync::Arc<dyn tinyinference_llm::model::ChatModel<()>>,
+) -> (String, serde_json::Value) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let endpoint = format!("http://{}/v1", listener.local_addr().unwrap());
+    let model = build(&endpoint);
+    let captured = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut bytes = Vec::new();
+        loop {
+            let mut buffer = [0; 4096];
+            let read = stream.read(&mut buffer).await.unwrap();
+            assert!(read > 0);
+            bytes.extend_from_slice(&buffer[..read]);
+            if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                let header = String::from_utf8_lossy(&bytes[..end]);
+                let length: usize = header
+                    .lines()
+                    .find_map(|line| {
+                        line.to_ascii_lowercase()
+                            .strip_prefix("content-length:")
+                            .map(|v| v.trim().parse().unwrap())
+                    })
+                    .unwrap();
+                if bytes.len() >= end + 4 + length {
+                    let body = serde_json::from_slice(&bytes[end + 4..end + 4 + length]).unwrap();
+                    let header = header.into_owned();
+                    stream.write_all(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}").await.unwrap();
+                    return (header, body);
+                }
+            }
+        }
+    });
+    let request = tinyinference_llm::model::ModelRequest::new(vec![
+        tinyinference_llm::message::Message::user("hello"),
+    ]);
+    let _ = model.invoke(&(), request).await;
+    captured.await.unwrap()
+}
+
+#[tokio::test]
+async fn explicit_local_modes_preserve_legacy_compatible_wire_without_native_warmup() {
+    use tinyinference_llm::providers::openai::{AuthStyle, build_local_runtime_chat_model};
+    use tinyinference_llm::providers::registry::{LocalCompatibleKind, OllamaContextMode};
+    for (slug, kind, key) in [
+        ("mlx", Some(LocalCompatibleKind::Mlx), ""),
+        ("omlx", Some(LocalCompatibleKind::Omlx), "local-key"),
+        (
+            "local-openai",
+            Some(LocalCompatibleKind::OpenAi),
+            "local-key",
+        ),
+        ("ollama", None, ""),
+    ] {
+        for model_id in ["CaseSensitive:latest", "claude-3-5-sonnet-latest"] {
+            let auth = if key.is_empty() {
+                AuthStyle::None
+            } else {
+                AuthStyle::Bearer
+            };
+            let num_ctx = (slug == "ollama").then_some(8192);
+            let (old_header, old_body) = capture_compatible_request(|endpoint| {
+                build_local_runtime_chat_model(
+                    slug,
+                    endpoint,
+                    key,
+                    auth.clone(),
+                    model_id,
+                    &[],
+                    Some(0.25),
+                    num_ctx,
+                )
+            })
+            .await;
+            let (new_header, new_body) = capture_compatible_request(|endpoint| {
+                let registry = ProviderRegistry::new(|_: &ProviderSpec| Ok(key.into()));
+                let mut spec = ProviderSpec::for_kind(if slug == "ollama" {
+                    ProviderKind::Ollama
+                } else {
+                    ProviderKind::Compatible
+                })
+                .with_model(model_id);
+                spec.provider = slug.into();
+                spec.base_url = endpoint.into();
+                spec.requires_api_key = false;
+                registry
+                    .build_with(
+                        &spec,
+                        ProviderBuildOptions {
+                            local_compatible: kind,
+                            ollama_context_mode: OllamaContextMode::CompatibleOnly,
+                            num_ctx,
+                            temperature_override: Some(0.25),
+                            auth_style: Some(auth.clone()),
+                            ..Default::default()
+                        },
+                    )
+                    .unwrap()
+            })
+            .await;
+            assert!(old_header.starts_with("POST /v1/chat/completions "));
+            assert!(
+                new_header.starts_with("POST /v1/chat/completions "),
+                "{new_header}"
+            );
+            assert_eq!(new_body, old_body, "{slug}:{model_id}");
+            let authorization = |header: &str| {
+                header
+                    .lines()
+                    .find(|line| line.to_ascii_lowercase().starts_with("authorization:"))
+                    .map(str::to_owned)
+            };
+            assert_eq!(authorization(&new_header), authorization(&old_header));
+        }
+    }
+}

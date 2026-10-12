@@ -94,13 +94,6 @@ fn local_and_oauth_discovery_do_not_read_credentials() {
     let registry = ProviderRegistry::new(|_: &ProviderSpec| -> Result<String> {
         panic!("discovery must not consult credentials when no listing exists")
     });
-    let spec = ProviderSpec::for_kind(ProviderKind::Ollama);
-    assert!(
-        registry
-            .discovery_request(&spec, &Default::default())
-            .unwrap()
-            .is_none()
-    );
     let spec = ProviderSpec::for_kind(ProviderKind::LmStudio);
     assert!(
         registry
@@ -291,4 +284,155 @@ fn local_registry_profiles_leave_unprobed_context_windows_unknown() {
             spec.provider
         );
     }
+}
+
+#[test]
+fn ollama_registry_exposes_native_model_limit_discovery() {
+    let registry = ProviderRegistry::new(|_: &ProviderSpec| Ok(String::new()));
+    let mut spec = ProviderSpec::for_kind(ProviderKind::Ollama).with_model("CaseSensitive:latest");
+    spec.base_url = "http://localhost:11434/v1".into();
+    let request = registry
+        .discovery_request(&spec, &Default::default())
+        .unwrap()
+        .expect("Ollama has native /api/show model-limit discovery");
+    assert!(request.ollama_native_enabled());
+    assert_eq!(request.model, "CaseSensitive:latest");
+    assert_eq!(request.endpoint, spec.base_url);
+}
+
+#[test]
+fn explicit_local_compatible_profiles_match_the_existing_compatible_builder() {
+    for (kind, slug) in [
+        (LocalCompatibleKind::Mlx, "mlx"),
+        (LocalCompatibleKind::Omlx, "omlx"),
+        (LocalCompatibleKind::OpenAi, "local-openai"),
+    ] {
+        for model_id in [
+            "CaseSensitive:latest",
+            "gpt-4o-mini",
+            "claude-3-5-sonnet-latest",
+        ] {
+            let registry = ProviderRegistry::new(|_: &ProviderSpec| Ok("local-key".into()));
+            let mut spec = ProviderSpec::for_kind(ProviderKind::Compatible).with_model(model_id);
+            spec.provider = slug.into();
+            spec.base_url = "http://localhost:8080/v1".into();
+            spec.requires_api_key = false;
+            let model = registry
+                .build_with(
+                    &spec,
+                    ProviderBuildOptions {
+                        local_compatible: Some(kind),
+                        auth_style: Some(AuthStyle::Bearer),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            let previous = super::super::openai::build_local_runtime_chat_model(
+                slug,
+                &spec.base_url,
+                "local-key",
+                AuthStyle::Bearer,
+                model_id,
+                &[],
+                None,
+                None,
+            );
+            assert_eq!(
+                serde_json::to_value(model.profile()).unwrap(),
+                serde_json::to_value(previous.profile()).unwrap()
+            );
+            assert_eq!(model.cache_identity(), previous.cache_identity());
+            assert_eq!(model.profile().unwrap().provider.as_deref(), Some(slug));
+            if model_id == "CaseSensitive:latest" {
+                assert_eq!(model.profile().unwrap().max_input_tokens, None);
+            }
+        }
+    }
+}
+
+#[test]
+fn explicit_local_compatible_discovery_never_reads_credentials() {
+    let registry = ProviderRegistry::new(|_: &ProviderSpec| -> Result<String> {
+        panic!("local compatible servers have no listing contract")
+    });
+    let spec = ProviderSpec::for_kind(ProviderKind::Compatible).with_model("local");
+    for kind in [
+        LocalCompatibleKind::Mlx,
+        LocalCompatibleKind::Omlx,
+        LocalCompatibleKind::OpenAi,
+    ] {
+        assert!(
+            registry
+                .discovery_request(
+                    &spec,
+                    &ProviderBuildOptions {
+                        local_compatible: Some(kind),
+                        ..Default::default()
+                    }
+                )
+                .unwrap()
+                .is_none()
+        );
+    }
+}
+
+struct NativeOllamaLimits;
+#[async_trait::async_trait]
+impl crate::model::discover::ModelListingFetcher for NativeOllamaLimits {
+    async fn get_json(&self, _: &str, _: &[(String, String)]) -> Result<serde_json::Value> {
+        Ok(serde_json::json!({"data":[]}))
+    }
+    async fn post_json(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+        body: &serde_json::Value,
+    ) -> Result<serde_json::Value> {
+        assert_eq!(url, "http://localhost:19321/api/show");
+        assert_eq!(body["model"], "CaseSensitive:latest");
+        assert!(headers.contains(&("x-local".into(), "scoped".into())));
+        Ok(serde_json::json!({"model_info":{"llama.context_length":32768}}))
+    }
+}
+#[tokio::test]
+async fn ollama_registry_native_request_discovers_actual_limits_on_nonstandard_ports() {
+    let registry = ProviderRegistry::new(|_: &ProviderSpec| Ok(String::new()));
+    let mut spec = ProviderSpec::for_kind(ProviderKind::Ollama).with_model("CaseSensitive:latest");
+    spec.base_url = "http://localhost:19321/v1".into();
+    let headers = [("x-local".into(), "scoped".into())];
+    let request = registry
+        .discovery_request(
+            &spec,
+            &ProviderBuildOptions {
+                extra_headers: &headers,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+    let limits = crate::model::discover::discover_model_limits_with(
+        &NativeOllamaLimits,
+        &Default::default(),
+        &request,
+    )
+    .await
+    .unwrap();
+    assert_eq!(limits.context_window, Some(32768));
+}
+
+#[test]
+fn local_compatible_settings_reject_a_cloud_provider_family() {
+    let registry = ProviderRegistry::new(|_: &ProviderSpec| Ok("key".into()));
+    let spec = ProviderSpec::for_kind(ProviderKind::OpenAi);
+    let error = match registry.build_with(
+        &spec,
+        ProviderBuildOptions {
+            local_compatible: Some(LocalCompatibleKind::Mlx),
+            ..Default::default()
+        },
+    ) {
+        Ok(_) => panic!("cloud family must not be relabeled by local-compatible options"),
+        Err(error) => error,
+    };
+    assert!(error.to_string().contains("requires a Compatible"));
 }
