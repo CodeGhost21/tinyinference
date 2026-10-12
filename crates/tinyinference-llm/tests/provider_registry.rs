@@ -230,9 +230,9 @@ async fn capture_compatible_request(
             }
         }
     });
-    let request = tinyinference_llm::model::ModelRequest::builder()
-        .messages(vec![tinyinference_llm::message::Message::user("hello")])
-        .build();
+    let request = tinyinference_llm::model::ModelRequest::new(vec![
+        tinyinference_llm::message::Message::user("hello"),
+    ]);
     let _ = model.invoke(&(), request).await;
     captured.await.unwrap()
 }
