@@ -301,6 +301,6 @@ fn ollama_registry_exposes_native_model_limit_discovery() {
     let request = registry.discovery_request(&spec, &Default::default()).unwrap()
         .expect("Ollama has native /api/show model-limit discovery");
     assert!(request.ollama_native_enabled());
-    assert_eq!(request.model_id, "CaseSensitive:latest");
+    assert_eq!(request.model, "CaseSensitive:latest");
     assert_eq!(request.endpoint, spec.base_url);
 }
