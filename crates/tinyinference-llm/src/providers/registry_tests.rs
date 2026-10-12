@@ -292,3 +292,15 @@ fn local_registry_profiles_leave_unprobed_context_windows_unknown() {
         );
     }
 }
+
+#[test]
+fn ollama_registry_exposes_native_model_limit_discovery() {
+    let registry = ProviderRegistry::new(|_: &ProviderSpec| Ok(String::new()));
+    let mut spec = ProviderSpec::for_kind(ProviderKind::Ollama).with_model("CaseSensitive:latest");
+    spec.base_url = "http://localhost:11434/v1".into();
+    let request = registry.discovery_request(&spec, &Default::default()).unwrap()
+        .expect("Ollama has native /api/show model-limit discovery");
+    assert!(request.ollama_native_enabled());
+    assert_eq!(request.model_id, "CaseSensitive:latest");
+    assert_eq!(request.endpoint, spec.base_url);
+}
