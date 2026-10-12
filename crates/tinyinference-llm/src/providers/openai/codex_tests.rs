@@ -2,6 +2,32 @@ use super::*;
 use tempfile::tempdir;
 
 #[test]
+fn oauth_routing_selects_subscription_endpoint_without_an_account_header() {
+    for account in [None, Some(""), Some(" \t\n ")] {
+        let routing = OpenAiCodexRouting::oauth(account);
+        assert_eq!(routing.endpoint, "https://chatgpt.com/backend-api/codex");
+        assert!(routing.using_oauth);
+        assert_eq!(routing.account_id, None);
+    }
+}
+
+#[test]
+fn oauth_routing_preserves_the_trimmed_account_header() {
+    let routing = OpenAiCodexRouting::oauth(Some("  account-example \n"));
+    assert_eq!(routing.endpoint, "https://chatgpt.com/backend-api/codex");
+    assert!(routing.using_oauth);
+    assert_eq!(routing.account_id.as_deref(), Some("account-example"));
+}
+
+#[test]
+fn standard_routing_preserves_host_endpoint_and_omits_oauth_headers() {
+    let routing = OpenAiCodexRouting::standard("https://example.invalid/v1///");
+    assert_eq!(routing.endpoint, "https://example.invalid/v1");
+    assert!(!routing.using_oauth);
+    assert_eq!(routing.account_id, None);
+}
+
+#[test]
 fn client_version_prefers_explicit_override() {
     let (version, source) =
         resolve_openai_codex_client_version_from(Some("  0.200.0  ".into()), None);

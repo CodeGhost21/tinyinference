@@ -35,6 +35,21 @@ pub struct OpenAiCodexRouting {
 }
 
 impl OpenAiCodexRouting {
+    /// Creates subscription-backend routing after the host selects OAuth credentials.
+    ///
+    /// Trims the optional account identifier and omits it when empty. This does
+    /// not resolve credentials or decide whether the host should use OAuth.
+    pub fn oauth(account_id: Option<&str>) -> Self {
+        Self {
+            endpoint: OPENAI_CODEX_BACKEND_BASE_URL.to_string(),
+            using_oauth: true,
+            account_id: account_id
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string),
+        }
+    }
+
     /// Creates standard non-OAuth routing metadata.
     pub fn standard(endpoint: &str) -> Self {
         Self {
