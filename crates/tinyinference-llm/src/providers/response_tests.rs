@@ -20,7 +20,7 @@ fn empty_response_does_not_require_default_on_billing_or_raw_calls() {
     assert!(response.tool_calls.is_empty());
     assert!(response.usage.is_none());
     assert!(response.reasoning_content.is_none());
-    let portable = ChatResponse::default();
+    let portable: ChatResponse = ChatResponse::default();
     assert!(portable.usage.is_none());
 }
 
