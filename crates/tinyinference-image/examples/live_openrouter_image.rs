@@ -68,10 +68,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     for (index, image) in response.images.iter().enumerate() {
         std::fs::create_dir_all(&out_dir)?;
         let stem = &format!(
-                    "image-{}-{}-{index}",
-                    model.replace('/', "_"),
-                    response.created.unwrap_or_default()
-                ).replace(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_', "_");
+            "image-{}-{}-{index}",
+            model.replace('/', "_"),
+            response.created.unwrap_or_default()
+        )
+        .replace(
+            |c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_',
+            "_",
+        );
         let path = out_dir.join(format!("{stem}.{}", image.extension("png")));
         std::fs::write(&path, &image.data)?;
         println!(
