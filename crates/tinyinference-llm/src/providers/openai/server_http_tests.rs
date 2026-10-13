@@ -1,5 +1,5 @@
 use super::*;
-use crate::MockModel;
+use crate::{MockModel, ModelResponse};
 use axum::body::Body;
 use axum::http::Request;
 use http_body_util::BodyExt;
