@@ -1632,8 +1632,8 @@ dependencies = [
 
 [[package]]
 name = "tinystoragedrivers-core"
-version = "0.7.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.7.0#6d1a1029de402f5937113fcc56e4023e0dc61c94"
+version = "0.8.0"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.8.0#f4b73d358f2e7b2ae9993f8e696401b1d2639858"
 dependencies = [
  "async-trait",
  "serde",
@@ -1644,8 +1644,8 @@ dependencies = [
 
 [[package]]
 name = "tinystoragedrivers-secrets"
-version = "0.7.0"
-source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.7.0#6d1a1029de402f5937113fcc56e4023e0dc61c94"
+version = "0.8.0"
+source = "git+https://github.com/tinyhumansai/tinystoragedrivers?tag=v0.8.0#f4b73d358f2e7b2ae9993f8e696401b1d2639858"
 dependencies = [
  "async-trait",
  "atomicwrites",
@@ -2071,7 +2071,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.52.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
