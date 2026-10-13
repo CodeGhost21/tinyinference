@@ -120,10 +120,7 @@ fn fake_env(name: &str) -> Option<String> {
 fn ollama_and_lm_studio_honor_injected_env_not_ambient() {
     let mut i = inputs(None, None);
     i.env = fake_env;
-    assert_eq!(
-        ok("ollama:m", &i).endpoint,
-        "http://injected-ollama:1/v1"
-    );
+    assert_eq!(ok("ollama:m", &i).endpoint, "http://injected-ollama:1/v1");
     assert_eq!(ok("lmstudio:m", &i).endpoint, "http://injected-lms:2/v1");
 }
 

@@ -69,7 +69,11 @@ impl std::fmt::Debug for ResolvedLocalRuntime {
             .field("endpoint", &self.endpoint)
             .field(
                 "api_key",
-                &if self.api_key.is_empty() { "" } else { "<redacted>" },
+                &if self.api_key.is_empty() {
+                    ""
+                } else {
+                    "<redacted>"
+                },
             )
             .field("auth", &self.auth)
             .field("model", &self.model)
@@ -162,7 +166,12 @@ pub fn resolve_local_runtime(
         }
         LocalProviderKind::LmStudio => {
             let (k, a) = keyed(inputs);
-            (lm_studio_base_url_with_env(inputs.base_url, inputs.env), k, a, None)
+            (
+                lm_studio_base_url_with_env(inputs.base_url, inputs.env),
+                k,
+                a,
+                None,
+            )
         }
         LocalProviderKind::Mlx => (
             env_or_config(profile.base_url_env, profile.default_base_url),
