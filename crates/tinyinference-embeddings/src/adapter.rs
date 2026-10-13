@@ -32,6 +32,7 @@ pub trait BorrowedEmbedBackend: Send + Sync {
 /// The signature is the trait default, so it routes through
 /// [`crate::format_embedding_signature`] and is byte-identical to one computed
 /// from configuration.
+#[derive(Clone)]
 pub struct BorrowedEmbeddingModel {
     backend: Arc<dyn BorrowedEmbedBackend>,
 }
@@ -41,6 +42,15 @@ impl BorrowedEmbeddingModel {
     #[must_use]
     pub fn new(backend: Arc<dyn BorrowedEmbedBackend>) -> Self {
         Self { backend }
+    }
+}
+
+impl std::fmt::Debug for BorrowedEmbeddingModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BorrowedEmbeddingModel")
+            .field("name", &self.backend.name())
+            .field("model_id", &self.backend.model_id())
+            .finish()
     }
 }
 
