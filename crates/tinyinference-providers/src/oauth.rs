@@ -1,12 +1,13 @@
 //! Host-neutral OAuth authorization-code flow with PKCE.
 
-use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use rand::RngExt as _;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tinystoragedrivers_secrets::SecretStore;
 
 const PENDING_TTL_SECS: u64 = 600;
 const HTTP_TIMEOUT_SECS: u64 = 20;
@@ -33,7 +34,7 @@ pub fn openai_codex_config(redirect_uri: impl Into<String>) -> OAuthConfig {
             .collect(),
         extra_authorize_params: vec![("access_type".to_string(), "offline".to_string())],
         state_equals_verifier: false,
-        pending_filename: "openai-oauth-pending.json".to_string(),
+        pending_secret: "openai-oauth-pending".to_string(),
     }
 }
 
@@ -56,8 +57,9 @@ pub struct OAuthConfig {
     pub extra_authorize_params: Vec<(String, String)>,
     /// Use the PKCE verifier itself as state when required by a provider.
     pub state_equals_verifier: bool,
-    /// Filename used for the short-lived pending session.
-    pub pending_filename: String,
+    /// Name of the secret holding the short-lived pending session (the PKCE
+    /// verifier is a bearer-equivalent value, so it lives in a [`SecretStore`]).
+    pub pending_secret: String,
 }
 
 impl std::fmt::Debug for OAuthConfig {
@@ -75,7 +77,7 @@ impl std::fmt::Debug for OAuthConfig {
             .field("scopes", &self.scopes)
             .field("extra_authorize_params", &self.extra_authorize_params)
             .field("state_equals_verifier", &self.state_equals_verifier)
-            .field("pending_filename", &self.pending_filename)
+            .field("pending_secret", &self.pending_secret)
             .finish()
     }
 }
@@ -235,25 +237,23 @@ struct PendingOAuth {
     created_at: u64,
 }
 
-/// File-backed PKCE flow. Credential persistence remains a host concern.
+/// PKCE flow whose short-lived pending state lives in a [`SecretStore`].
+/// Credential persistence remains a host concern.
 #[derive(Clone, Debug)]
 pub struct OAuthFlow {
     config: OAuthConfig,
-    pending_path: PathBuf,
+    secrets: Arc<dyn SecretStore>,
 }
 
 impl OAuthFlow {
-    /// Creates a flow whose short-lived pending state is rooted in `state_dir`.
-    pub fn new(config: OAuthConfig, state_dir: impl AsRef<Path>) -> Self {
-        let pending_path = state_dir.as_ref().join(&config.pending_filename);
-        Self {
-            config,
-            pending_path,
-        }
+    /// Creates a flow whose short-lived pending state is kept in `secrets`
+    /// under [`OAuthConfig::pending_secret`].
+    pub fn new(config: OAuthConfig, secrets: Arc<dyn SecretStore>) -> Self {
+        Self { config, secrets }
     }
 
     /// Creates PKCE state, persists it, and returns the authorization URL.
-    pub fn start(&self) -> Result<OAuthStart, String> {
+    pub async fn start(&self) -> Result<OAuthStart, String> {
         let (verifier, challenge) = generate_pkce();
         let state = if self.config.state_equals_verifier {
             verifier.clone()
@@ -265,7 +265,12 @@ impl OAuthFlow {
             verifier,
             redirect_uri: self.config.redirect_uri.clone(),
             created_at: unix_now_secs(),
-        })?;
+        })
+        .await?;
+        tracing::debug!(
+            backend = self.secrets.backend_name(),
+            "[tinyinference-oauth] pending session stored"
+        );
         Ok(OAuthStart {
             auth_url: authorization_url(&self.config, &state, &challenge)?,
             state,
@@ -276,11 +281,12 @@ impl OAuthFlow {
     /// Validates a callback and exchanges its authorization code for tokens.
     pub async fn complete(&self, callback: &str) -> Result<OAuthTokenSet, String> {
         let pending = self
-            .read_pending()?
+            .read_pending()
+            .await?
             .ok_or_else(|| "no pending OAuth session; start the OAuth flow first".to_string())?;
         let (code, returned_state) = parse_callback_input(callback)?;
         if returned_state != pending.state {
-            self.clear_pending();
+            self.clear_pending().await;
             return Err("OAuth state mismatch — try connecting again".to_string());
         }
         let token = exchange_authorization_code(
@@ -290,28 +296,35 @@ impl OAuthFlow {
             &pending.redirect_uri,
         )
         .await?;
-        self.clear_pending();
+        self.clear_pending().await;
         Ok(token)
     }
 
     /// Removes any pending authorization state.
-    pub fn clear_pending(&self) {
-        let _ = std::fs::remove_file(&self.pending_path);
-    }
-
-    fn write_pending(&self, pending: &PendingOAuth) -> Result<(), String> {
-        if let Some(parent) = self.pending_path.parent() {
-            std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    pub async fn clear_pending(&self) {
+        if let Err(error) = self.secrets.delete(&self.config.pending_secret).await {
+            tracing::debug!(%error, "[tinyinference-oauth] clearing pending session failed");
         }
-        let json = serde_json::to_vec_pretty(pending).map_err(|error| error.to_string())?;
-        std::fs::write(&self.pending_path, json).map_err(|error| error.to_string())
     }
 
-    fn read_pending(&self) -> Result<Option<PendingOAuth>, String> {
-        let bytes = match std::fs::read(&self.pending_path) {
-            Ok(bytes) => bytes,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(error) => return Err(error.to_string()),
+    async fn write_pending(&self, pending: &PendingOAuth) -> Result<(), String> {
+        let json = zeroize::Zeroizing::new(
+            serde_json::to_vec(pending).map_err(|error| error.to_string())?,
+        );
+        self.secrets
+            .set(&self.config.pending_secret, &json)
+            .await
+            .map_err(|error| error.to_string())
+    }
+
+    async fn read_pending(&self) -> Result<Option<PendingOAuth>, String> {
+        let Some(bytes) = self
+            .secrets
+            .get(&self.config.pending_secret)
+            .await
+            .map_err(|error| error.to_string())?
+        else {
+            return Ok(None);
         };
         if bytes.is_empty() {
             return Ok(None);
@@ -319,7 +332,7 @@ impl OAuthFlow {
         let pending: PendingOAuth =
             serde_json::from_slice(&bytes).map_err(|error| error.to_string())?;
         if unix_now_secs().saturating_sub(pending.created_at) > PENDING_TTL_SECS {
-            self.clear_pending();
+            self.clear_pending().await;
             return Ok(None);
         }
         Ok(Some(pending))
