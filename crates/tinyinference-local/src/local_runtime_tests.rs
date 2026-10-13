@@ -20,7 +20,13 @@ fn ok(provider: &str, i: &LocalRuntimeInputs<'_>) -> ResolvedLocalRuntime {
 #[test]
 fn non_local_strings_do_not_resolve() {
     let i = inputs(None, None);
-    for p in ["openai:gpt-4o", "anthropic:claude", "openhuman:x", "", "gpt-4o"] {
+    for p in [
+        "openai:gpt-4o",
+        "anthropic:claude",
+        "openhuman:x",
+        "",
+        "gpt-4o",
+    ] {
         assert!(resolve_local_runtime(p, &i).is_none(), "{p}");
     }
 }
@@ -55,7 +61,10 @@ fn omlx_defaults_to_8000_and_uses_bearer_with_key() {
     assert_eq!(r.endpoint, "http://127.0.0.1:8000/v1");
     assert_eq!(r.auth, LocalRuntimeAuth::Bearer);
     assert_eq!(r.api_key, "k");
-    assert_eq!(ok("omlx:m", &inputs(None, Some("  "))).auth, LocalRuntimeAuth::None);
+    assert_eq!(
+        ok("omlx:m", &inputs(None, Some("  "))).auth,
+        LocalRuntimeAuth::None
+    );
 }
 
 #[test]
