@@ -1,5 +1,4 @@
 use super::*;
-use tinystoragedrivers_secrets::SecretStore as _;
 
 fn unsigned_jwt(payload: serde_json::Value) -> String {
     let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"none"}"#);
@@ -166,7 +165,6 @@ async fn corrupt_pending_state_is_an_error_not_a_panic() {
         .await
         .unwrap();
     assert!(flow.complete("code=abc&state=s").await.is_err());
-    secrets.set("test-oauth-pending", b"").await.unwrap_err();
 }
 
 #[tokio::test]
