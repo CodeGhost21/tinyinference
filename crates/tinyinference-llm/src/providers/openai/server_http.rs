@@ -71,7 +71,9 @@ impl BackendFailure {
 
     fn into_response(self) -> Response {
         let (status, kind) = match self.kind {
-            BackendFailureKind::InvalidRequest => (StatusCode::BAD_REQUEST, "invalid_request_error"),
+            BackendFailureKind::InvalidRequest => {
+                (StatusCode::BAD_REQUEST, "invalid_request_error")
+            }
             BackendFailureKind::Internal => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
         };
         (
@@ -283,7 +285,10 @@ async fn chat_completions(
         }
         Err(e) => {
             warn!("{LOG_PREFIX} chat_completions: inference failed: {e}");
-            error_response(StatusCode::INTERNAL_SERVER_ERROR, format!("inference error: {e}"))
+            error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("inference error: {e}"),
+            )
         }
     }
 }
