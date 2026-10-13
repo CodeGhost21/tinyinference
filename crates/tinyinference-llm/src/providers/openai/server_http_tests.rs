@@ -201,6 +201,8 @@ fn provider_stop_reasons_map_onto_the_openai_vocabulary() {
         (None, "stop"),
         (Some("end_turn"), "stop"),
         (Some("max_tokens"), "length"),
+        (Some("MAX_TOKENS"), "length"),
+        (Some("Tool_Use"), "tool_calls"),
         (Some("tool_use"), "tool_calls"),
         (Some("content_filter"), "content_filter"),
     ] {
