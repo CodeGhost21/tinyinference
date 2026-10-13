@@ -16,11 +16,11 @@
 pub mod budget;
 pub mod context_window;
 mod decorators;
-mod error_slot;
-pub mod workload;
 pub mod discover;
+mod error_slot;
 mod fallback;
 mod types;
+pub mod workload;
 
 #[cfg(test)]
 mod migration_tests;

@@ -54,8 +54,16 @@ pub struct WorkloadRouteSpec {
 /// - `vision` is `image_in`-gated and primary-only (a text fallback cannot
 ///   satisfy the gate).
 pub const WORKLOAD_ROUTES: &[WorkloadRouteSpec] = &[
-    WorkloadRouteSpec { name: ROUTE_CHAT, fallbacks: &[ROUTE_BURST], requires_image_in: false },
-    WorkloadRouteSpec { name: ROUTE_BURST, fallbacks: &[ROUTE_CHAT], requires_image_in: false },
+    WorkloadRouteSpec {
+        name: ROUTE_CHAT,
+        fallbacks: &[ROUTE_BURST],
+        requires_image_in: false,
+    },
+    WorkloadRouteSpec {
+        name: ROUTE_BURST,
+        fallbacks: &[ROUTE_CHAT],
+        requires_image_in: false,
+    },
     WorkloadRouteSpec {
         name: ROUTE_REASONING,
         fallbacks: &[ROUTE_AGENTIC],
@@ -66,13 +74,21 @@ pub const WORKLOAD_ROUTES: &[WorkloadRouteSpec] = &[
         fallbacks: &[ROUTE_REASONING],
         requires_image_in: false,
     },
-    WorkloadRouteSpec { name: ROUTE_CODING, fallbacks: &[ROUTE_AGENTIC], requires_image_in: false },
+    WorkloadRouteSpec {
+        name: ROUTE_CODING,
+        fallbacks: &[ROUTE_AGENTIC],
+        requires_image_in: false,
+    },
     WorkloadRouteSpec {
         name: ROUTE_SUMMARIZATION,
         fallbacks: &[ROUTE_CHAT],
         requires_image_in: false,
     },
-    WorkloadRouteSpec { name: ROUTE_VISION, fallbacks: &[], requires_image_in: true },
+    WorkloadRouteSpec {
+        name: ROUTE_VISION,
+        fallbacks: &[],
+        requires_image_in: true,
+    },
 ];
 
 /// Looks up a route by alias.

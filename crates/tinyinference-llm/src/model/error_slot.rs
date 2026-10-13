@@ -36,7 +36,9 @@ pub struct ErrorSlotModel<State: Send + Sync> {
 
 impl<State: Send + Sync> std::fmt::Debug for ErrorSlotModel<State> {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.debug_struct("ErrorSlotModel").finish_non_exhaustive()
+        formatter
+            .debug_struct("ErrorSlotModel")
+            .finish_non_exhaustive()
     }
 }
 
@@ -76,7 +78,12 @@ impl<State: Send + Sync> ChatModel<State> for ErrorSlotModel<State> {
         self.inner.profile()
     }
 
-    fn supports_input(&self, modality: InputModality, mime_type: &str, source: InputSource) -> bool {
+    fn supports_input(
+        &self,
+        modality: InputModality,
+        mime_type: &str,
+        source: InputSource,
+    ) -> bool {
         self.inner.supports_input(modality, mime_type, source)
     }
 

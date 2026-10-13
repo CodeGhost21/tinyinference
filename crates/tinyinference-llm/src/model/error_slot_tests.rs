@@ -1,8 +1,8 @@
 //! `ErrorSlotModel` keeps the slot filled with the provider failure that ended
 //! a model call, including one reported inside a stream.
 use super::*;
-use async_trait::async_trait;
 use crate::message::{AssistantMessage, ContentBlock};
+use async_trait::async_trait;
 use futures::StreamExt;
 
 const REJECTION: &str = "Message at index 2 has role 'tool' but is not preceded by an \
@@ -43,19 +43,11 @@ fn rejection() -> ProviderError {
 
 #[async_trait]
 impl ChatModel<()> for ScriptedStreamModel {
-    async fn invoke(
-        &self,
-        _state: &(),
-        _request: ModelRequest,
-    ) -> crate::Result<ModelResponse> {
+    async fn invoke(&self, _state: &(), _request: ModelRequest) -> crate::Result<ModelResponse> {
         Err(crate::Error::Provider(Box::new(rejection())))
     }
 
-    async fn stream(
-        &self,
-        _state: &(),
-        _request: ModelRequest,
-    ) -> crate::Result<ModelStream> {
+    async fn stream(&self, _state: &(), _request: ModelRequest) -> crate::Result<ModelStream> {
         let item = self.0.lock().unwrap().remove(0);
         Ok(ModelStream::new(Box::pin(futures::stream::iter(vec![
             item,

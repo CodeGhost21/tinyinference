@@ -9,10 +9,12 @@
 //! [`Usage`] records per-call token counts and supports `+`/`+=` accumulation.
 //! [`UsageTotals`] aggregates many calls, also tracking the call count.
 
+mod meta;
 mod types;
 
 use std::ops::{Add, AddAssign};
 
+pub use meta::*;
 pub use types::*;
 
 impl Usage {
