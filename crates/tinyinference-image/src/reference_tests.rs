@@ -3,7 +3,9 @@
 use std::path::Path;
 
 use bytes::Bytes;
-use tinystoragedrivers_core::{BlobStore, MemoryBlobs};
+use std::sync::Arc;
+
+use tinystoragedrivers_core::{BlobStore, MemoryStorage, Scope, StorageBackend};
 
 use crate::media::GeneratedMedia;
 use crate::mock::TINY_PNG;
@@ -165,12 +167,21 @@ fn media_types_and_extensions_round_trip() {
     );
 }
 
+fn memory_blobs() -> Arc<dyn BlobStore> {
+    let scope = Scope::new("media-test").unwrap();
+    MemoryStorage::new()
+        .for_scope(&scope)
+        .unwrap()
+        .blobs()
+        .clone()
+}
+
 #[tokio::test]
 async fn persist_sanitizes_the_stem_and_refuses_empty_artifacts() {
-    let blobs = MemoryBlobs::new();
+    let blobs = memory_blobs();
     let media = GeneratedMedia::new("image/png", TINY_PNG);
     let meta = media
-        .persist(&blobs, "media/out", "../../etc/passwd", "bin")
+        .persist(blobs.as_ref(), "media/out", "../../etc/passwd", "bin")
         .await
         .unwrap();
     assert_eq!(meta.key, "media/out/______etc_passwd.png");
@@ -180,26 +191,29 @@ async fn persist_sanitizes_the_stem_and_refuses_empty_artifacts() {
 
     let empty = GeneratedMedia::new("image/png", Bytes::new());
     assert!(matches!(
-        empty.persist(&blobs, "", "x", "png").await,
+        empty.persist(blobs.as_ref(), "", "x", "png").await,
         Err(Error::Validation(_))
     ));
 }
 
 #[tokio::test]
 async fn persist_without_prefix_uses_fallback_extension_and_default_stem() {
-    let blobs = MemoryBlobs::new();
+    let blobs = memory_blobs();
     let media = GeneratedMedia::new("application/x-unknown", TINY_PNG);
-    let meta = media.persist(&blobs, "/", "", "we ird").await.unwrap();
+    let meta = media
+        .persist(blobs.as_ref(), "/", "", "we ird")
+        .await
+        .unwrap();
     assert_eq!(meta.key, "media.we_ird");
     assert_eq!(blobs.list("").await.unwrap().len(), 1);
 }
 
 #[tokio::test]
 async fn persist_surfaces_a_store_refusal_as_a_storage_error() {
-    let blobs = MemoryBlobs::new();
+    let blobs = memory_blobs();
     let media = GeneratedMedia::new("image/png", TINY_PNG);
     assert!(matches!(
-        media.persist(&blobs, "a/../b", "x", "png").await,
+        media.persist(blobs.as_ref(), "a/../b", "x", "png").await,
         Err(Error::Storage(_))
     ));
     assert!(blobs.list("").await.unwrap().is_empty());
