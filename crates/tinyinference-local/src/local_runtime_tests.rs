@@ -107,3 +107,31 @@ fn prefix_alias_is_canonicalised_but_model_case_kept() {
     assert_eq!(r.kind, LocalProviderKind::LmStudio);
     assert_eq!(r.model, "Qwen/Q3-GGUF");
 }
+
+fn fake_env(name: &str) -> Option<String> {
+    match name {
+        "OPENHUMAN_OLLAMA_BASE_URL" => Some("http://injected-ollama:1".into()),
+        "OPENHUMAN_LM_STUDIO_BASE_URL" => Some("http://injected-lms:2/v1".into()),
+        _ => None,
+    }
+}
+
+#[test]
+fn ollama_and_lm_studio_honor_injected_env_not_ambient() {
+    let mut i = inputs(None, None);
+    i.env = fake_env;
+    assert_eq!(
+        ok("ollama:m", &i).endpoint,
+        "http://injected-ollama:1/v1"
+    );
+    assert_eq!(ok("lmstudio:m", &i).endpoint, "http://injected-lms:2/v1");
+}
+
+#[test]
+fn debug_output_redacts_api_key() {
+    let i = inputs(None, Some("sk-secret-key"));
+    assert!(!format!("{i:?}").contains("sk-secret-key"));
+    let r = ok("omlx:m", &i);
+    assert_eq!(r.api_key, "sk-secret-key");
+    assert!(!format!("{r:?}").contains("sk-secret-key"));
+}

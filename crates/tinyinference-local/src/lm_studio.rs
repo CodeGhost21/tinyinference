@@ -12,15 +12,21 @@ pub const DEFAULT_LM_STUDIO_BASE_URL: &str = "http://localhost:1234/v1";
 
 /// Resolves the effective LM Studio base URL.
 pub fn lm_studio_base_url(configured: Option<&str>) -> String {
+    lm_studio_base_url_with_env(configured, |name| std::env::var(name).ok())
+}
+
+/// Like [`lm_studio_base_url`] but reads the `*_BASE_URL` overrides through
+/// `env` instead of the ambient process environment.
+pub fn lm_studio_base_url_with_env(
+    configured: Option<&str>,
+    env: impl Fn(&str) -> Option<String>,
+) -> String {
     for (source, candidate) in [
         (
             "OPENHUMAN_LM_STUDIO_BASE_URL",
-            std::env::var("OPENHUMAN_LM_STUDIO_BASE_URL").ok(),
+            env("OPENHUMAN_LM_STUDIO_BASE_URL"),
         ),
-        (
-            "LM_STUDIO_BASE_URL",
-            std::env::var("LM_STUDIO_BASE_URL").ok(),
-        ),
+        ("LM_STUDIO_BASE_URL", env("LM_STUDIO_BASE_URL")),
         ("configured", configured.map(str::to_owned)),
     ] {
         let Some(raw) = candidate else {

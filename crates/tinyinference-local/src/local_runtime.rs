@@ -6,8 +6,8 @@
 //! [`LocalRuntimeInputs::env`] so hosts and tests control them. Privacy and
 //! session gates stay in the host.
 
-use crate::lm_studio::lm_studio_base_url;
-use crate::ollama::ollama_base_url_from_override;
+use crate::lm_studio::lm_studio_base_url_with_env;
+use crate::ollama::ollama_base_url_from_override_with_env;
 use crate::profile::{LocalProviderKind, kind_from_provider_string, profile_for_kind};
 use tinyinference_providers::route::split_model_and_temperature;
 
@@ -21,7 +21,7 @@ pub enum LocalRuntimeAuth {
 }
 
 /// Host-supplied configuration for resolving a local runtime.
-#[derive(Debug, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct LocalRuntimeInputs<'a> {
     /// Configured base URL override (`local_ai.base_url`).
     pub base_url: Option<&'a str>,
@@ -33,8 +33,18 @@ pub struct LocalRuntimeInputs<'a> {
     pub env: fn(&str) -> Option<String>,
 }
 
+impl std::fmt::Debug for LocalRuntimeInputs<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalRuntimeInputs")
+            .field("base_url", &self.base_url)
+            .field("api_key", &self.api_key.map(|_| "<redacted>"))
+            .field("num_ctx", &self.num_ctx)
+            .finish_non_exhaustive()
+    }
+}
+
 /// A fully resolved local runtime call target.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct ResolvedLocalRuntime {
     /// Runtime kind.
     pub kind: LocalProviderKind,
@@ -50,6 +60,23 @@ pub struct ResolvedLocalRuntime {
     pub temperature: Option<f64>,
     /// `num_ctx` to send (Ollama only).
     pub num_ctx: Option<u32>,
+}
+
+impl std::fmt::Debug for ResolvedLocalRuntime {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedLocalRuntime")
+            .field("kind", &self.kind)
+            .field("endpoint", &self.endpoint)
+            .field(
+                "api_key",
+                &if self.api_key.is_empty() { "" } else { "<redacted>" },
+            )
+            .field("auth", &self.auth)
+            .field("model", &self.model)
+            .field("temperature", &self.temperature)
+            .field("num_ctx", &self.num_ctx)
+            .finish()
+    }
 }
 
 /// Why a provider string could not be resolved.
@@ -124,7 +151,7 @@ pub fn resolve_local_runtime(
 
     let (endpoint, api_key, auth, num_ctx) = match kind {
         LocalProviderKind::Ollama => {
-            let base = ollama_base_url_from_override(inputs.base_url);
+            let base = ollama_base_url_from_override_with_env(inputs.base_url, inputs.env);
             let normalized = base.trim_end_matches('/').trim_end_matches("/v1");
             (
                 format!("{normalized}/v1"),
@@ -135,7 +162,7 @@ pub fn resolve_local_runtime(
         }
         LocalProviderKind::LmStudio => {
             let (k, a) = keyed(inputs);
-            (lm_studio_base_url(inputs.base_url), k, a, None)
+            (lm_studio_base_url_with_env(inputs.base_url, inputs.env), k, a, None)
         }
         LocalProviderKind::Mlx => (
             env_or_config(profile.base_url_env, profile.default_base_url),

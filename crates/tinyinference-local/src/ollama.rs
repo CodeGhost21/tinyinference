@@ -83,8 +83,14 @@ fn normalize_unspecified_host(url: &str) -> String {
 /// Unspecified bind addresses (`0.0.0.0`, `[::]`) are rewritten to their
 /// loopback equivalents so the URL is valid as a client connect target.
 pub fn ollama_base_url() -> String {
-    let app_override = std::env::var("OPENHUMAN_OLLAMA_BASE_URL").ok();
-    let ollama_host = std::env::var("OLLAMA_HOST").ok();
+    ollama_base_url_with_env(|name| std::env::var(name).ok())
+}
+
+/// Like [`ollama_base_url`] but reads the env values through `env` instead
+/// of the ambient process environment.
+pub fn ollama_base_url_with_env(env: impl Fn(&str) -> Option<String>) -> String {
+    let app_override = env("OPENHUMAN_OLLAMA_BASE_URL");
+    let ollama_host = env("OLLAMA_HOST");
     resolve_ollama_base_url(app_override.as_deref(), ollama_host.as_deref())
 }
 
@@ -132,6 +138,14 @@ pub fn resolve_ollama_base_url(app_override: Option<&str>, ollama_host: Option<&
 /// Unspecified bind addresses (`0.0.0.0`, `[::]`) are rewritten to their
 /// loopback equivalents so the URL is valid as a client connect target.
 pub fn ollama_base_url_from_override(configured: Option<&str>) -> String {
+    ollama_base_url_from_override_with_env(configured, |name| std::env::var(name).ok())
+}
+
+/// Like [`ollama_base_url_from_override`] but reads env values through `env`.
+pub fn ollama_base_url_from_override_with_env(
+    configured: Option<&str>,
+    env: impl Fn(&str) -> Option<String>,
+) -> String {
     if let Some(url) = configured {
         let trimmed = url.trim().trim_end_matches('/');
         if !trimmed.is_empty() {
@@ -143,7 +157,7 @@ pub fn ollama_base_url_from_override(configured: Option<&str>) -> String {
             return normalized;
         }
     }
-    let resolved = ollama_base_url();
+    let resolved = ollama_base_url_with_env(env);
     tracing::debug!(
         "[local_ai] ollama_base_url_from_override: configured base_url absent, resolved -> {}",
         redact_ollama_base_url(&resolved)
