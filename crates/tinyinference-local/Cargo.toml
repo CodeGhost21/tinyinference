@@ -23,6 +23,7 @@ serde_json = { workspace = true }
 thiserror = { workspace = true }
 tinyinference-core = { version = "0.4.0", path = "../tinyinference-core" }
 tinyinference-llm = { version = "0.4.0", path = "../tinyinference-llm" }
+tinyinference-providers = { version = "0.4.0", path = "../tinyinference-providers" }
 tinyinference-embeddings = { version = "0.4.0", path = "../tinyinference-embeddings" }
 tokio = { workspace = true }
 tracing = { workspace = true }
