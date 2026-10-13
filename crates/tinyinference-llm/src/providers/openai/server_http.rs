@@ -180,7 +180,9 @@ fn has_tools(req: &ChatCompletionRequest) -> bool {
 /// Maps a provider stop reason onto the OpenAI `finish_reason` vocabulary.
 /// An absent reason is a normal `stop`.
 fn wire_finish_reason(reason: Option<&str>) -> String {
-    match reason.map(str::trim) {
+    // Providers disagree on case (`MAX_TOKENS` from some gateways).
+    let reason = reason.map(|reason| reason.trim().to_ascii_lowercase());
+    match reason.as_deref() {
         None | Some("") => "stop",
         Some("length" | "max_tokens" | "max_output_tokens") => "length",
         Some("tool_calls" | "tool_use" | "function_call") => "tool_calls",

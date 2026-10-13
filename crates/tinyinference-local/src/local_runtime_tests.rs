@@ -132,3 +132,19 @@ fn debug_output_redacts_api_key() {
     assert_eq!(r.api_key, "sk-secret-key");
     assert!(!format!("{r:?}").contains("sk-secret-key"));
 }
+
+#[test]
+fn debug_output_strips_url_credentials_query_and_fragment() {
+    let url = "http://user:pw@host:1/v1?token=abc#frag";
+    let i = inputs(Some(url), None);
+    let shown = format!("{i:?}");
+    for secret in ["user", "pw@", "token=abc", "frag"] {
+        assert!(!shown.contains(secret), "{shown}");
+    }
+    assert!(shown.contains("host:1"), "{shown}");
+    let r = ok("omlx:m", &inputs(Some(url), None));
+    let shown = format!("{r:?}");
+    for secret in ["user", "pw@", "token=abc", "frag"] {
+        assert!(!shown.contains(secret), "{shown}");
+    }
+}
