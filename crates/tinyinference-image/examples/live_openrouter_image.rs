@@ -66,17 +66,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let response = generator.generate(request).await?;
     let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/live-media");
     for (index, image) in response.images.iter().enumerate() {
-        let path = image
-            .persist(
-                &out_dir,
-                &format!(
+        std::fs::create_dir_all(&out_dir)?;
+        let stem = &format!(
                     "image-{}-{}-{index}",
                     model.replace('/', "_"),
                     response.created.unwrap_or_default()
-                ),
-                "png",
-            )
-            .await?;
+                ).replace(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_', "_");
+        let path = out_dir.join(format!("{stem}.{}", image.extension("png")));
+        std::fs::write(&path, &image.data)?;
         println!(
             "saved {} ({} bytes, {})",
             path.display(),

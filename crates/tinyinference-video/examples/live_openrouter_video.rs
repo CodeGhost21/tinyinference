@@ -85,13 +85,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let out_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/live-media");
     for (index, video) in response.videos.iter().enumerate() {
-        let path = video
-            .persist(
-                &out_dir,
-                &format!("video-{}-{index}", response.job_id),
-                "mp4",
-            )
-            .await?;
+        std::fs::create_dir_all(&out_dir)?;
+        let stem = &format!("video-{}-{index}", response.job_id).replace(|c: char| !c.is_ascii_alphanumeric() && c != '-' && c != '_', "_");
+        let path = out_dir.join(format!("{stem}.{}", video.extension("mp4")));
+        std::fs::write(&path, &video.data)?;
         println!(
             "saved {} ({} bytes, {})",
             path.display(),
