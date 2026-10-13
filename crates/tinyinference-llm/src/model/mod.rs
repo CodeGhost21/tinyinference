@@ -16,6 +16,8 @@
 pub mod budget;
 pub mod context_window;
 mod decorators;
+mod error_slot;
+pub mod workload;
 pub mod discover;
 mod fallback;
 mod types;
@@ -32,6 +34,7 @@ use crate::tool::{ToolCall, ToolSchema};
 use crate::usage::Usage;
 
 pub use decorators::*;
+pub use error_slot::{ErrorSlotModel, ModelErrorSlot};
 pub use fallback::FallbackModel;
 pub use types::*;
 
