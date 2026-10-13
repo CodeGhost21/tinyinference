@@ -1,8 +1,7 @@
-//! Generated media artifacts and their persistence.
-
-use std::path::{Path, PathBuf};
+//! Generated media artifacts and their persistence through the blob port.
 
 use bytes::Bytes;
+use tinystoragedrivers_core::{BlobMeta, BlobStore};
 
 use crate::reference::extension_for_media_type;
 use crate::{Error, Result};
@@ -37,70 +36,67 @@ impl GeneratedMedia {
         extension_for_media_type(&self.media_type, fallback)
     }
 
-    /// Writes the artifact to `dir/<stem>.<ext>`, creating `dir` if needed,
-    /// and returns the written path. `fallback_extension` is used when the
-    /// media type is unknown.
+    /// Stores the artifact in `blobs` under `<prefix>/<stem>.<ext>` (or
+    /// `<stem>.<ext>` for an empty `prefix`) and returns what was written.
+    /// `fallback_extension` is used when the media type is unknown.
     ///
-    /// The stem is sanitized to `[A-Za-z0-9_-]` so a provider id can never
-    /// traverse out of `dir`.
+    /// The stem and the extension are sanitized to `[A-Za-z0-9_-]` so a
+    /// provider id can never add a path segment (`..`) to the key. `prefix`
+    /// is the caller's own namespace and is validated by the store.
     ///
     /// # Errors
     ///
-    /// [`Error::Validation`] for an empty artifact, [`Error::Io`] when the
-    /// directory or file cannot be written.
+    /// [`Error::Validation`] for an empty artifact, [`Error::Storage`] when the
+    /// store refuses the key or the write.
     pub async fn persist(
         &self,
-        dir: &Path,
+        blobs: &dyn BlobStore,
+        prefix: &str,
         stem: &str,
         fallback_extension: &str,
-    ) -> Result<PathBuf> {
+    ) -> Result<BlobMeta> {
         if self.data.is_empty() {
             return Err(Error::Validation(
                 "refusing to persist an empty artifact".into(),
             ));
         }
-        tokio::fs::create_dir_all(dir).await?;
-        let stem: String = stem
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        let stem = if stem.is_empty() {
-            "media".to_owned()
+        let stem = sanitize_component(stem, "media");
+        let safe_fallback = sanitize_component(fallback_extension, "bin");
+        let extension = extension_for_media_type(&self.media_type, &safe_fallback);
+        let prefix = prefix.trim_matches('/');
+        let key = if prefix.is_empty() {
+            format!("{stem}.{extension}")
         } else {
-            stem
+            format!("{prefix}/{stem}.{extension}")
         };
-        // Sanitize the fallback extension to a safe filename component.
-        let safe_fallback: String = fallback_extension
-            .chars()
-            .map(|c| {
-                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                    c
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        let safe_fallback = if safe_fallback.is_empty() {
-            "bin"
-        } else {
-            &safe_fallback
-        };
-        let extension = extension_for_media_type(&self.media_type, safe_fallback);
-        let path = dir.join(format!("{stem}.{extension}"));
-        tokio::fs::write(&path, &self.data).await?;
+        let meta = blobs
+            .put(&key, self.data.to_vec(), Some(&self.media_type))
+            .await?;
         tracing::debug!(
-            path = %path.display(),
+            key = %meta.key,
             bytes = self.data.len(),
             media_type = %self.media_type,
             "[tinyinference-image] persisted generated media"
         );
-        Ok(path)
+        Ok(meta)
+    }
+}
+
+fn sanitize_component(raw: &str, empty: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if cleaned.is_empty() {
+        empty.to_owned()
+    } else {
+        cleaned
     }
 }
 

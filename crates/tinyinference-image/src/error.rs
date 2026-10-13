@@ -64,9 +64,12 @@ pub enum Error {
         /// The cap that was exceeded, in bytes.
         limit: usize,
     },
-    /// Reading a local reference or writing an artifact failed.
+    /// Reading a local reference failed.
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    /// The storage port refused or failed to hold a generated artifact.
+    #[error("storage error: {0}")]
+    Storage(#[from] tinystoragedrivers_core::StorageError),
     /// A JSON payload could not be encoded or decoded.
     #[error("serialization error: {0}")]
     Serialization(#[from] serde_json::Error),

@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use bytes::Bytes;
+use tinystoragedrivers_core::{BlobStore, MemoryBlobs};
 
 use crate::media::GeneratedMedia;
 use crate::mock::TINY_PNG;
@@ -166,21 +167,42 @@ fn media_types_and_extensions_round_trip() {
 
 #[tokio::test]
 async fn persist_sanitizes_the_stem_and_refuses_empty_artifacts() {
-    let dir = tempfile::tempdir().unwrap();
+    let blobs = MemoryBlobs::new();
     let media = GeneratedMedia::new("image/png", TINY_PNG);
-    let path = media
-        .persist(dir.path(), "../../etc/passwd", "bin")
+    let meta = media
+        .persist(&blobs, "media/out", "../../etc/passwd", "bin")
         .await
         .unwrap();
-    assert_eq!(path.parent().unwrap(), dir.path());
-    assert_eq!(path.file_name().unwrap(), "______etc_passwd.png");
-    assert_eq!(std::fs::read(&path).unwrap(), TINY_PNG);
+    assert_eq!(meta.key, "media/out/______etc_passwd.png");
+    assert_eq!(meta.content_type.as_deref(), Some("image/png"));
+    let stored = blobs.get(&meta.key).await.unwrap().unwrap();
+    assert_eq!(stored.bytes, TINY_PNG);
 
     let empty = GeneratedMedia::new("image/png", Bytes::new());
     assert!(matches!(
-        empty.persist(dir.path(), "x", "png").await,
+        empty.persist(&blobs, "", "x", "png").await,
         Err(Error::Validation(_))
     ));
+}
+
+#[tokio::test]
+async fn persist_without_prefix_uses_fallback_extension_and_default_stem() {
+    let blobs = MemoryBlobs::new();
+    let media = GeneratedMedia::new("application/x-unknown", TINY_PNG);
+    let meta = media.persist(&blobs, "/", "", "we ird").await.unwrap();
+    assert_eq!(meta.key, "media.we_ird");
+    assert_eq!(blobs.list("").await.unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn persist_surfaces_a_store_refusal_as_a_storage_error() {
+    let blobs = MemoryBlobs::new();
+    let media = GeneratedMedia::new("image/png", TINY_PNG);
+    assert!(matches!(
+        media.persist(&blobs, "a/../b", "x", "png").await,
+        Err(Error::Storage(_))
+    ));
+    assert!(blobs.list("").await.unwrap().is_empty());
 }
 
 #[tokio::test]
