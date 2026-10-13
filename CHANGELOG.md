@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.4.0
+
+### Breaking changes
+
+- Storage goes through tinystoragedrivers ports: `OAuthFlow::new` takes an
+  `Arc<dyn SecretStore>`, `start`/`clear_pending` are async, `pending_filename`
+  is now `pending_secret`; `GeneratedMedia::persist` writes to a `BlobStore`
+  and returns `BlobMeta` (new `Error::Storage`).
+
 ### Fixed
 
 - OpenAI-compatible provider: an Anthropic-family request that asks for
