@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- OpenAI-compatible provider: a streamed response now keeps the vendor fields
+  of `usage` (OpenRouter's `cost`, `cost_details`, `is_byok`) on `raw`, under
+  `usage`, where the non-streaming response already has them in its wire
+  body. A caller that reads a reported charge from `/usage/cost` saw it only
+  when it did not stream. The token counts the normalized usage reads stay off
+  `raw`, so a plain OpenAI stream still has `raw: None`.
 - Depend on `tinystoragedrivers-core` / `-secrets` v0.7.0 (was v0.5.0), so a host that vendors the v0.7.0 storage crates holds one `SecretStore` and one `BlobStore` trait instead of two (tinyhumansai/openhuman#7641).
 
 ## 0.4.1

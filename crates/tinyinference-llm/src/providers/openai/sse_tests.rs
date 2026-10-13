@@ -59,6 +59,53 @@ async fn sse_stream_keeps_gateway_extension_frame_on_raw() {
     assert!(raw.get("usage").is_none());
 }
 
+/// OpenRouter reports what a call cost inside `usage` (`cost`, `cost_details`,
+/// `is_byok`). The non-streaming response keeps them on `raw`, under `usage`,
+/// as part of the full wire body; a streamed response must keep them at the
+/// same path, or a caller reading `/usage/cost` sees the charge only when it
+/// did not stream. The token counts the normalized usage already reads stay
+/// off `raw`.
+#[tokio::test]
+async fn sse_stream_keeps_usage_extension_fields_on_raw() {
+    let response = completed(vec![
+        b"data: {\"id\":\"c1\",\"choices\":[{\"delta\":{\"content\":\"hi\"},\"finish_reason\":null}],\"usage\":null}\n\n",
+        b"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":100,\"completion_tokens\":5,\"total_tokens\":105,\"prompt_tokens_details\":{\"cached_tokens\":80},\"cost\":0.000183,\"is_byok\":false,\"cost_details\":{\"upstream_inference_cost\":null}}}\n\n",
+        b"data: [DONE]\n\n",
+    ])
+    .await;
+
+    let usage = response.usage.unwrap();
+    assert_eq!(usage.total_tokens, 105);
+    assert_eq!(usage.cache_read_tokens, 80);
+    let raw = response.raw.as_ref().expect("usage extensions kept on raw");
+    assert_eq!(raw.pointer("/usage/cost"), Some(&json!(0.000183)));
+    assert_eq!(raw["usage"]["is_byok"], json!(false));
+    assert!(raw["usage"]["cost_details"].is_object());
+    // Normalized fields are not duplicated onto `raw`.
+    for key in [
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "prompt_tokens_details",
+    ] {
+        assert!(raw["usage"].get(key).is_none(), "{key} on raw");
+    }
+}
+
+/// A later usage frame's extension fields replace an earlier one's, as
+/// top-level extensions do (last value per key).
+#[tokio::test]
+async fn sse_stream_usage_extensions_last_value_wins() {
+    let response = completed(vec![
+        b"data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}],\"usage\":{\"prompt_tokens\":1,\"cost\":0.1}}\n\n",
+        b"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":2,\"cost\":0.2}}\n\n",
+        b"data: [DONE]\n\n",
+    ])
+    .await;
+    let raw = response.raw.as_ref().expect("usage extensions kept");
+    assert_eq!(raw["usage"]["cost"], json!(0.2));
+}
+
 /// Extension fields riding on ordinary chunks are kept too (last value per
 /// key).
 #[tokio::test]

@@ -147,9 +147,11 @@ pub(super) struct OpenAiStreamAcc {
     /// each block gets its own [`ModelStreamItem::BlockStart`]).
     current_block: Option<(usize, OpenKind)>,
     /// Top-level fields of streamed payloads outside the OpenAI chunk schema
-    /// (a gateway's billing envelope, say), last value per key. They become
-    /// the terminal response's `raw`, the same place the non-streaming path
-    /// keeps the full wire body, so a caller reads them identically on both.
+    /// (a gateway's billing envelope, say), and fields of `usage` outside the
+    /// ones the normalized usage reads (OpenRouter's `cost`, say), under
+    /// `usage`; last value per key. They become the terminal response's
+    /// `raw`, the same place the non-streaming path keeps the full wire body,
+    /// so a caller reads them identically, at the same paths, on both.
     extensions: serde_json::Map<String, Value>,
 }
 
@@ -166,7 +168,45 @@ const CHUNK_KEYS: &[&str] = &[
     "service_tier",
 ];
 
+/// Keys of a `usage` object that `UsageWire` reads into the normalized
+/// usage. Any other key of a streamed `usage` object is a vendor extension
+/// (OpenRouter's `cost`, `cost_details`, `is_byok`) and is kept for `raw`,
+/// under `usage`.
+const USAGE_KEYS: &[&str] = &[
+    "prompt_tokens",
+    "completion_tokens",
+    "total_tokens",
+    "prompt_tokens_details",
+    "completion_tokens_details",
+    "prompt_cache_hit_tokens",
+];
+
 impl OpenAiStreamAcc {
+    /// Keeps the fields of a streamed `usage` object outside [`USAGE_KEYS`] on
+    /// `raw`'s `usage`, last value per key. A `usage` object with none leaves
+    /// `raw` untouched.
+    fn keep_usage_extensions(&mut self, usage: &serde_json::Map<String, Value>) {
+        let mut kept = usage
+            .iter()
+            .filter(|(key, _)| !USAGE_KEYS.contains(&key.as_str()))
+            .peekable();
+        if kept.peek().is_none() {
+            return;
+        }
+        let entry = self
+            .extensions
+            .entry("usage")
+            .or_insert_with(|| Value::Object(serde_json::Map::new()));
+        if !entry.is_object() {
+            *entry = Value::Object(serde_json::Map::new());
+        }
+        if let Value::Object(target) = entry {
+            for (key, field) in kept {
+                target.insert(key.clone(), field.clone());
+            }
+        }
+    }
+
     /// Builds an accumulator with the given inline reasoning-tag extraction
     /// config (`None` disables inline extraction).
     pub(super) fn new(reasoning_tags: Option<ReasoningTagExtraction>) -> Self {
@@ -663,6 +703,9 @@ impl SseState {
                 if !CHUNK_KEYS.contains(&key.as_str()) {
                     self.acc.extensions.insert(key.clone(), field.clone());
                 }
+            }
+            if let Some(Value::Object(usage)) = fields.get("usage") {
+                self.acc.keep_usage_extensions(usage);
             }
         }
         if let Ok(chunk) = serde_json::from_value::<ChatCompletionChunk>(value) {
