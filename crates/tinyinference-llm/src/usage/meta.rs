@@ -54,14 +54,19 @@ pub struct ProviderUsageReport {
 
 impl ProviderUsageReport {
     /// Builds the crate [`Usage`], carrying every token breakdown. A finite,
-    /// positive charge becomes `charged_amount` in USD micros.
+    /// positive charge becomes `charged_amount` in USD micros, but only when the
+    /// provider reported it: a catalog estimate is never recorded as a charge.
     #[must_use]
     pub fn to_usage(&self) -> Usage {
         let mut usage = Usage::new(self.input_tokens, self.output_tokens);
         usage.cache_read_tokens = self.cached_input_tokens;
         usage.cache_creation_tokens = self.cache_creation_tokens;
         usage.reasoning_tokens = self.reasoning_tokens;
-        if self.charged_amount_usd.is_finite() && self.charged_amount_usd > 0.0 {
+        if self.charge_reported
+            && !self.cost_is_estimate
+            && self.charged_amount_usd.is_finite()
+            && self.charged_amount_usd > 0.0
+        {
             usage.charged_amount = Some(ChargedAmount::usd_micros(
                 (self.charged_amount_usd * 1_000_000.0).round() as i64,
             ));

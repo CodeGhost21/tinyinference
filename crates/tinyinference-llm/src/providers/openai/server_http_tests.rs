@@ -144,3 +144,89 @@ async fn max_completion_tokens_takes_precedence_over_max_tokens() {
     .unwrap();
     assert_eq!(req.max_completion_tokens.or(req.max_tokens), Some(200));
 }
+
+struct Scripted(ModelResponse);
+
+#[async_trait]
+impl ChatBackend for Scripted {
+    async fn resolve(&self, model: &str, _: Option<f64>) -> Result<ResolvedChat, BackendFailure> {
+        Ok(ResolvedChat {
+            chat_model: Arc::new(MockModel::with_responses(vec![self.0.clone()])),
+            model_id: model.to_string(),
+            temperature: 0.5,
+        })
+    }
+
+    async fn list_models(&self) -> Result<Vec<ListedModel>, BackendFailure> {
+        Ok(vec![])
+    }
+}
+
+fn truncated_response() -> ModelResponse {
+    // `total_tokens` left at zero: the documented fallback is input + output.
+    let mut usage = crate::usage::Usage::new(3, 4);
+    usage.total_tokens = 0;
+    ModelResponse {
+        usage: Some(usage),
+        ..ModelResponse::assistant("cut off").with_finish_reason("length")
+    }
+}
+
+#[tokio::test]
+async fn unary_completion_preserves_finish_reason_and_total_fallback() {
+    let (status, body) = call(
+        router::<()>(Arc::new(Scripted(truncated_response()))),
+        post_json(json!({"model":"m","messages":[{"role":"user","content":"yo"}]})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["choices"][0]["finish_reason"], "length");
+    assert_eq!(v["usage"]["total_tokens"], 7);
+}
+
+#[tokio::test]
+async fn streaming_completion_preserves_finish_reason() {
+    let (_, body) = call(
+        router::<()>(Arc::new(Scripted(truncated_response()))),
+        post_json(json!({"model":"m","stream":true,"messages":[{"role":"user","content":"yo"}]})),
+    )
+    .await;
+    assert!(body.contains("\"finish_reason\":\"length\""), "{body}");
+}
+
+#[test]
+fn provider_stop_reasons_map_onto_the_openai_vocabulary() {
+    for (given, want) in [
+        (None, "stop"),
+        (Some("end_turn"), "stop"),
+        (Some("max_tokens"), "length"),
+        (Some("tool_use"), "tool_calls"),
+        (Some("content_filter"), "content_filter"),
+    ] {
+        assert_eq!(wire_finish_reason(given), want, "{given:?}");
+    }
+}
+
+#[tokio::test]
+async fn requests_with_tools_are_rejected_instead_of_silently_ignored() {
+    let (status, body) = call(
+        app(None),
+        post_json(json!({
+            "model":"m","messages":[{"role":"user","content":"yo"}],
+            "tools":[{"type":"function","function":{"name":"f"}}]
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let v: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(v["error"]["type"], "invalid_request_error");
+    for empty in [json!(null), json!([])] {
+        let (status, _) = call(
+            app(None),
+            post_json(json!({"model":"m","messages":[],"tools":empty})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+    }
+}

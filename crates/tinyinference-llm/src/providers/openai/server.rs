@@ -69,7 +69,7 @@ pub struct ChatCompletionChoice {
     /// The completed assistant message.
     pub message: ChatCompletionMessage,
     /// Reason generation stopped, supplied when known.
-    pub finish_reason: &'static str,
+    pub finish_reason: String,
 }
 
 /// Token counts for a completed request.
@@ -109,7 +109,7 @@ pub struct ChatCompletionChunkChoice {
     pub delta: ChatCompletionDelta,
     /// Reason generation stopped, supplied when known.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub finish_reason: Option<&'static str>,
+    pub finish_reason: Option<String>,
 }
 
 /// Incremental role and visible text fields in a streamed choice.

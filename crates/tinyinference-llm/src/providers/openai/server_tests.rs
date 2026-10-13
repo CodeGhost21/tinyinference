@@ -57,7 +57,7 @@ fn unary_completion_serializes_the_complete_server_envelope() {
                 role: "assistant".into(),
                 content: "hello".into(),
             },
-            finish_reason: "stop",
+            finish_reason: "stop".into(),
         }],
         usage: ChatCompletionUsage {
             prompt_tokens: 3,
@@ -99,7 +99,7 @@ fn streamed_chunks_omit_absent_fields_and_keep_the_terminal_reason() {
                 role: None,
                 content: None,
             },
-            Some("stop"),
+            Some("stop".to_string()),
             json!({"index": 0, "delta": {}, "finish_reason": "stop"}),
         ),
     ] {

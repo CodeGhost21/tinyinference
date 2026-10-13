@@ -131,3 +131,22 @@ fn usage_meta_raw_wire_shape_is_stable_and_old_payloads_load() {
     assert_eq!(recovered.context_window, 32_000);
     assert_eq!(recovered.usage.input_tokens, 7);
 }
+
+#[test]
+fn estimated_or_unreported_cost_never_becomes_a_charged_amount() {
+    for (charge_reported, cost_is_estimate, expect_charge) in [
+        (true, false, true),
+        (true, true, false),
+        (false, false, false),
+    ] {
+        let usage = ProviderUsageReport {
+            input_tokens: 1,
+            charged_amount_usd: 0.5,
+            charge_reported,
+            cost_is_estimate,
+            ..Default::default()
+        }
+        .to_usage();
+        assert_eq!(usage.charged_amount.is_some(), expect_charge);
+    }
+}

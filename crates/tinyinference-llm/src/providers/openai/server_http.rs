@@ -167,6 +167,29 @@ fn map_messages(req: &ChatCompletionRequest) -> Vec<Message> {
         .collect()
 }
 
+/// Whether the request carries tool definitions. `null` and an empty array
+/// mean "no tools" and are accepted.
+fn has_tools(req: &ChatCompletionRequest) -> bool {
+    match &req.tools {
+        None | Some(serde_json::Value::Null) => false,
+        Some(serde_json::Value::Array(tools)) => !tools.is_empty(),
+        Some(_) => true,
+    }
+}
+
+/// Maps a provider stop reason onto the OpenAI `finish_reason` vocabulary.
+/// An absent reason is a normal `stop`.
+fn wire_finish_reason(reason: Option<&str>) -> String {
+    match reason.map(str::trim) {
+        None | Some("") => "stop",
+        Some("length" | "max_tokens" | "max_output_tokens") => "length",
+        Some("tool_calls" | "tool_use" | "function_call") => "tool_calls",
+        Some("content_filter" | "refusal") => "content_filter",
+        Some(_) => "stop",
+    }
+    .to_string()
+}
+
 async fn chat_completions(
     State(backend): State<Arc<dyn ChatBackend>>,
     Json(req): Json<ChatCompletionRequest>,
@@ -177,6 +200,13 @@ async fn chat_completions(
         message_count = req.messages.len(),
         "{LOG_PREFIX} chat_completions: start"
     );
+    if has_tools(&req) {
+        warn!(model = %req.model, "{LOG_PREFIX} chat_completions: tools not supported");
+        return BackendFailure::invalid_request(
+            "`tools` are not supported by this endpoint: it serves text-only chat completions",
+        )
+        .into_response();
+    }
     let resolved = match backend.resolve(&req.model, req.temperature).await {
         Ok(r) => r,
         Err(e) => {
@@ -222,7 +252,10 @@ async fn chat_completions(
                         ModelStreamItem::MessageDelta(delta) if !delta.text.is_empty() => {
                             (Some(delta.text), None)
                         }
-                        ModelStreamItem::Completed(_) => (None, Some("stop")),
+                        ModelStreamItem::Completed(response) => (
+                            None,
+                            Some(wire_finish_reason(response.finish_reason.as_deref())),
+                        ),
                         ModelStreamItem::Failed(message) => {
                             return Some(stream_error_event(&message));
                         }
@@ -262,6 +295,7 @@ async fn chat_completions(
         Ok(model_response) => {
             debug!("{LOG_PREFIX} chat_completions: non-streaming ok");
             let usage = model_response.usage.unwrap_or_default();
+            let finish_reason = wire_finish_reason(model_response.finish_reason.as_deref());
             let response = ChatCompletionResponse {
                 id: completion_id,
                 object: "chat.completion",
@@ -273,12 +307,12 @@ async fn chat_completions(
                         role: "assistant".to_string(),
                         content: model_response.text(),
                     },
-                    finish_reason: "stop",
+                    finish_reason,
                 }],
                 usage: ChatCompletionUsage {
                     prompt_tokens: usage.input_tokens,
                     completion_tokens: usage.output_tokens,
-                    total_tokens: usage.total_tokens,
+                    total_tokens: usage.effective_total(),
                 },
             };
             (StatusCode::OK, Json(response)).into_response()
