@@ -88,7 +88,7 @@ impl BackendFailure {
 #[allow(missing_debug_implementations)]
 pub struct ResolvedChat {
     /// The model to invoke.
-    pub chat_model: Box<dyn ChatModel<()>>,
+    pub chat_model: Arc<dyn ChatModel<()>>,
     /// Provider-side model id sent on the request.
     pub model_id: String,
     /// Temperature to send.

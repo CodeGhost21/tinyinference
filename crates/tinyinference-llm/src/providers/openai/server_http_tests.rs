@@ -20,7 +20,7 @@ impl ChatBackend for Fake {
             return Err(f.clone());
         }
         Ok(ResolvedChat {
-            chat_model: Box::new(MockModel::constant(format!("hi from {model}"))),
+            chat_model: Arc::new(MockModel::constant(format!("hi from {model}"))),
             model_id: model.to_string(),
             temperature: temperature.unwrap_or(0.5),
         })
