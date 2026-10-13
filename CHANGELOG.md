@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Depend on `tinystoragedrivers-core` / `-secrets` v0.7.0 (was v0.5.0), so a host that vendors the v0.7.0 storage crates holds one `SecretStore` and one `BlobStore` trait instead of two (tinyhumansai/openhuman#7641).
+
 ## 0.4.1
 
 ### Breaking changes
