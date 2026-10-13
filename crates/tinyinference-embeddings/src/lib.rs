@@ -415,6 +415,7 @@ impl Retriever {
     }
 }
 
+mod adapter;
 mod cloud;
 mod cohere;
 mod noop;
@@ -423,6 +424,7 @@ mod openai;
 mod rate_limit;
 mod voyage;
 
+pub use adapter::{BorrowedEmbedBackend, BorrowedEmbeddingModel};
 pub use noop::NoopEmbeddingModel;
 pub use ollama::{
     DEFAULT_OLLAMA_DIMENSIONS, DEFAULT_OLLAMA_MODEL, DEFAULT_OLLAMA_URL, OllamaEmbeddingModel,

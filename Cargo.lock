@@ -1498,6 +1498,7 @@ dependencies = [
 name = "tinyinference-embeddings"
 version = "0.4.1"
 dependencies = [
+ "anyhow",
  "async-trait",
  "futures",
  "http",
