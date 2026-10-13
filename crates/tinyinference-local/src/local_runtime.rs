@@ -7,7 +7,7 @@
 //! session gates stay in the host.
 
 use crate::lm_studio::lm_studio_base_url_with_env;
-use crate::ollama::ollama_base_url_from_override_with_env;
+use crate::ollama::{ollama_base_url_from_override_with_env, redact_ollama_base_url};
 use crate::profile::{LocalProviderKind, kind_from_provider_string, profile_for_kind};
 use tinyinference_providers::route::split_model_and_temperature;
 
@@ -36,7 +36,7 @@ pub struct LocalRuntimeInputs<'a> {
 impl std::fmt::Debug for LocalRuntimeInputs<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("LocalRuntimeInputs")
-            .field("base_url", &self.base_url)
+            .field("base_url", &self.base_url.map(redact_ollama_base_url))
             .field("api_key", &self.api_key.map(|_| "<redacted>"))
             .field("num_ctx", &self.num_ctx)
             .finish_non_exhaustive()
@@ -66,7 +66,7 @@ impl std::fmt::Debug for ResolvedLocalRuntime {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ResolvedLocalRuntime")
             .field("kind", &self.kind)
-            .field("endpoint", &self.endpoint)
+            .field("endpoint", &redact_ollama_base_url(&self.endpoint))
             .field(
                 "api_key",
                 &if self.api_key.is_empty() {
