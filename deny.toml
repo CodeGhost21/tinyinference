@@ -51,4 +51,9 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # TinyTools is a sibling TinyHumans repository; `tinytools-agent` is not on
 # crates.io.
-allow-git = ["https://github.com/tinyhumansai/tinytools"]
+# tinystoragedrivers supplies the storage ports (secrets, blobs) the OAuth
+# pending state and generated media are written through.
+allow-git = [
+    "https://github.com/tinyhumansai/tinytools",
+    "https://github.com/tinyhumansai/tinystoragedrivers",
+]
