@@ -236,6 +236,18 @@ pub trait EmbeddingModel: Send + Sync {
         })
     }
 
+    /// Embeds a single text.
+    ///
+    /// # Errors
+    /// As [`Self::embed`], plus [`crate::Error::Embedding`] when the model
+    /// returns no vector.
+    async fn embed_one(&self, text: &str) -> Result<Vec<f32>> {
+        let mut vectors = self.embed(&[text.to_owned()]).await?;
+        vectors
+            .pop()
+            .ok_or_else(|| crate::Error::Embedding("Empty embedding result".to_string()))
+    }
+
     /// Embeds a retrieval query. Asymmetric providers can override this;
     /// symmetric models reuse [`Self::embed`].
     async fn embed_query(&self, query: &str) -> Result<Vec<f32>> {

@@ -14,6 +14,7 @@
 #![cfg_attr(not(test), forbid(unsafe_code))]
 
 pub mod lm_studio;
+pub mod local_runtime;
 pub mod model_requirements;
 pub mod models;
 pub mod ollama;

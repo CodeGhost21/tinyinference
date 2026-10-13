@@ -1498,6 +1498,7 @@ dependencies = [
 name = "tinyinference-embeddings"
 version = "0.4.1"
 dependencies = [
+ "anyhow",
  "async-trait",
  "futures",
  "http",
@@ -1537,9 +1538,11 @@ name = "tinyinference-llm"
 version = "0.4.1"
 dependencies = [
  "async-trait",
+ "axum",
  "base64 0.23.1",
  "bytes",
  "futures",
+ "http-body-util",
  "reqwest",
  "serde",
  "serde_json",
@@ -1549,7 +1552,9 @@ dependencies = [
  "tinyinference-providers",
  "tinytools-agent",
  "tokio",
+ "tower",
  "tracing",
+ "uuid",
 ]
 
 [[package]]
@@ -1570,6 +1575,7 @@ dependencies = [
  "tinyinference-core",
  "tinyinference-embeddings",
  "tinyinference-llm",
+ "tinyinference-providers",
  "tokio",
  "tracing",
  "url",

@@ -12,6 +12,7 @@ keywords = ["embeddings", "inference", "retrieval", "vectors"]
 categories = ["api-bindings", "asynchronous"]
 
 [dependencies]
+anyhow = "1"
 async-trait = { workspace = true }
 once_cell = { workspace = true }
 regex = { workspace = true }

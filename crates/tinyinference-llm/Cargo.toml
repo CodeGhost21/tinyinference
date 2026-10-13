@@ -11,7 +11,16 @@ readme = "../../README.md"
 keywords = ["llm", "inference", "streaming", "openai", "anthropic"]
 categories = ["api-bindings", "asynchronous"]
 
+[features]
+default = []
+# Generic OpenAI-compatible `/chat/completions` + `/models` axum handlers over a
+# host `ChatBackend` (lives here, not in tinyinference-providers: this crate
+# already depends on providers, so the reverse edge would be a cycle).
+server-http = ["dep:axum", "dep:uuid"]
+
 [dependencies]
+axum = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
 base64 = "0.23"
 async-trait = { workspace = true }
 bytes = { workspace = true }
@@ -30,6 +39,10 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 
 [dev-dependencies]
+axum = { workspace = true }
+uuid = { workspace = true }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["test-util"] }
 

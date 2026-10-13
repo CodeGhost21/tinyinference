@@ -466,9 +466,15 @@ pub fn parse_retry_after_ms(message: &str) -> Option<u64> {
 
 mod context_limit;
 pub mod http;
+mod messages;
 mod text;
 
 pub use context_limit::parse_context_limit_from_error;
+pub use messages::{
+    TRANSIENT_PROVIDER_HTTP_STATUSES, is_ollama_cloud_internal_500_message,
+    local_provider_no_model_loaded_user_message, ollama_cloud_internal_500_user_message,
+    should_report_provider_http_status,
+};
 pub use text::{
     extract_provider_error_detail, extract_provider_name, is_auth_error_text,
     is_codex_token_expired_text, is_connection_dropped_text, is_context_length_text,

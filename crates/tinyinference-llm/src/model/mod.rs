@@ -17,8 +17,10 @@ pub mod budget;
 pub mod context_window;
 mod decorators;
 pub mod discover;
+mod error_slot;
 mod fallback;
 mod types;
+pub mod workload;
 
 #[cfg(test)]
 mod migration_tests;
@@ -32,6 +34,7 @@ use crate::tool::{ToolCall, ToolSchema};
 use crate::usage::Usage;
 
 pub use decorators::*;
+pub use error_slot::{ErrorSlotModel, ModelErrorSlot};
 pub use fallback::FallbackModel;
 pub use types::*;
 

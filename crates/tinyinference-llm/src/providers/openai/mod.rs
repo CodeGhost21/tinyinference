@@ -89,6 +89,8 @@ mod local;
 mod reasoning_tags;
 mod responses;
 pub mod server;
+#[cfg(feature = "server-http")]
+pub mod server_http;
 mod sse;
 mod transport;
 
